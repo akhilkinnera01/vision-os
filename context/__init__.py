@@ -1,0 +1,2 @@
+"""Scene context inference logic."""
+
