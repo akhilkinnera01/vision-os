@@ -13,6 +13,11 @@ import numpy as np
 from common.models import Detection, ReplayRecord, SourceMode
 
 
+def _ensure_parent_directory(path: Path) -> None:
+    """Create the output directory when callers pass a nested artifact path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
 @dataclass(slots=True)
 class FramePacket:
     """One runtime input frame, optionally carrying replay detections."""
@@ -55,10 +60,15 @@ class VideoFrameSource:
     """Read frames from a local video file for deterministic demos."""
 
     def __init__(self, input_path: str) -> None:
-        self._capture = cv2.VideoCapture(input_path)
+        self._path = Path(input_path)
+        self._capture: cv2.VideoCapture | None = None
+        if self._path.is_file():
+            self._capture = cv2.VideoCapture(str(self._path))
         self._frame_index = 0
 
     def read(self) -> FramePacket | None:
+        if self._capture is None:
+            return None
         ok, frame = self._capture.read()
         if not ok:
             return None
@@ -73,10 +83,11 @@ class VideoFrameSource:
         return packet
 
     def is_opened(self) -> bool:
-        return self._capture.isOpened()
+        return self._capture.isOpened() if self._capture is not None else False
 
     def close(self) -> None:
-        self._capture.release()
+        if self._capture is not None:
+            self._capture.release()
 
 
 class ReplayFrameSource:
@@ -112,7 +123,9 @@ class ReplayRecorder:
 
     def __init__(self, output_path: str, source_mode: SourceMode) -> None:
         self._source_mode = source_mode
-        self._file = Path(output_path).open("w", encoding="utf-8")
+        output = Path(output_path)
+        _ensure_parent_directory(output)
+        self._file = output.open("w", encoding="utf-8")
 
     def write(
         self,

@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+from app import _validate_input_path
+from common.config import VisionOSConfig
 from common.models import (
     BoundingBox,
     ContextLabel,
@@ -194,6 +197,15 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
     assert packet.frame.shape == (720, 1280, 3)
 
 
+def test_replay_recorder_creates_parent_directories(tmp_path: Path) -> None:
+    output_path = tmp_path / "nested" / "captures" / "session.jsonl"
+    recorder = ReplayRecorder(str(output_path), source_mode=SourceMode.WEBCAM)
+    recorder.write(frame_index=1, timestamp=0.5, frame_shape=(720, 1280), detections=[make_detection("person")])
+    recorder.close()
+
+    assert output_path.is_file()
+
+
 def test_benchmark_tracker_summary() -> None:
     tracker = BenchmarkTracker()
     tracker.record_inference(0.0, 12.0, ContextLabel.FOCUSED_WORK)
@@ -205,6 +217,15 @@ def test_benchmark_tracker_summary() -> None:
     assert summary.dropped_frames == 1
     assert summary.average_inference_ms == 15.0
     assert summary.decision_switch_rate == 1.0
+
+
+def test_benchmark_summary_creates_parent_directories(tmp_path: Path) -> None:
+    tracker = BenchmarkTracker()
+    tracker.record_inference(0.0, 9.0, ContextLabel.FOCUSED_WORK)
+    output_path = tmp_path / "benchmarks" / "run" / "summary.json"
+    tracker.write_summary(str(output_path))
+
+    assert output_path.is_file()
 
 
 def test_replay_record_serialization_is_stable() -> None:
@@ -227,3 +248,10 @@ def test_replay_record_serialization_is_stable() -> None:
 def test_renderer_safe_shape_fixture() -> None:
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
     assert frame.shape == (720, 1280, 3)
+
+
+def test_validate_input_path_rejects_missing_demo_input(tmp_path: Path) -> None:
+    config = VisionOSConfig(source_mode=SourceMode.VIDEO, input_path=str(tmp_path / "missing.mp4"))
+
+    with pytest.raises(FileNotFoundError, match="Video input not found"):
+        _validate_input_path(config)

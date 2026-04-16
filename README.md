@@ -79,9 +79,9 @@ Process a local video, emit a benchmark file, and save a replay artifact:
 ```bash
 python app.py \
   --source video \
-  --input /tmp/demo.avi \
-  --record /tmp/demo-replay.jsonl \
-  --benchmark-output /tmp/demo-benchmark.json
+  --input demo/sample.mp4 \
+  --record demo/demo-replay.jsonl \
+  --benchmark-output demo/demo-benchmark.json
 ```
 
 Replay the saved detections in debug mode:
@@ -89,9 +89,12 @@ Replay the saved detections in debug mode:
 ```bash
 python app.py \
   --source replay \
-  --input /tmp/demo-replay.jsonl \
+  --input demo/demo-replay.jsonl \
   --overlay-mode debug
 ```
+
+The repository includes `demo/sample.mp4` so the example above works from a fresh clone.
+Generated replay and benchmark artifacts inside `demo/` are ignored by git.
 
 Press `q` to exit non-headless runs.
 

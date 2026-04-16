@@ -15,3 +15,6 @@ yolov8n.pt
 *.mp4
 benchmarks/
 recordings/
+demo/*.json
+demo/*.jsonl
+!demo/sample.mp4

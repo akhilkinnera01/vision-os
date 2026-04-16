@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 
@@ -126,6 +127,17 @@ def _build_source(config: VisionOSConfig):
     return ReplayFrameSource(config.input_path or "")
 
 
+def _validate_input_path(config: VisionOSConfig) -> None:
+    """Fail fast with a readable CLI error when file-backed inputs are missing."""
+    if config.source_mode not in {SourceMode.VIDEO, SourceMode.REPLAY}:
+        return
+
+    input_path = Path(config.input_path or "")
+    if not input_path.is_file():
+        source_name = "video" if config.source_mode == SourceMode.VIDEO else "replay"
+        raise FileNotFoundError(f"{source_name.capitalize()} input not found: {input_path}")
+
+
 def _process_packet(
     packet: FramePacket,
     detector: YOLODetector | None,
@@ -180,6 +192,11 @@ def _process_packet(
 
 def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
+    if not source.is_opened():
+        print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
+        source.close()
+        return 1
+
     feature_builder = FeatureBuilder()
     temporal_memory = TemporalMemory(config.temporal_window_seconds)
     context_engine = ContextRulesEngine()
@@ -191,10 +208,6 @@ def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer)
         if config.record_path and config.source_mode != SourceMode.REPLAY
         else None
     )
-
-    if not source.is_opened():
-        print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
-        return 1
 
     frame_queue: queue.Queue = queue.Queue(maxsize=1)
     result_queue: queue.Queue = queue.Queue(maxsize=1)
@@ -272,6 +285,11 @@ def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer)
 
 def _run_sequential_mode(config: VisionOSConfig, source, renderer: FrameRenderer) -> int:
     """Run video or replay modes deterministically without dropping frames."""
+    if not source.is_opened():
+        print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
+        source.close()
+        return 1
+
     feature_builder = FeatureBuilder()
     temporal_memory = TemporalMemory(config.temporal_window_seconds)
     context_engine = ContextRulesEngine()
@@ -284,10 +302,6 @@ def _run_sequential_mode(config: VisionOSConfig, source, renderer: FrameRenderer
         else None
     )
     detector = None if config.source_mode == SourceMode.REPLAY else YOLODetector(config)
-
-    if not source.is_opened():
-        print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
-        return 1
 
     processed_frames = 0
     try:
@@ -338,9 +352,14 @@ def _run_sequential_mode(config: VisionOSConfig, source, renderer: FrameRenderer
 
 def main() -> int:
     """Run the end-to-end source loop until the user quits or the source is exhausted."""
-    config = parse_args()
-    renderer = FrameRenderer(config.overlay_mode)
-    source = _build_source(config)
+    try:
+        config = parse_args()
+        _validate_input_path(config)
+        renderer = FrameRenderer(config.overlay_mode)
+        source = _build_source(config)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     if config.source_mode == SourceMode.WEBCAM and not config.headless:
         return _run_streaming_mode(config, source, renderer)
