@@ -39,8 +39,12 @@ include = [
   "explain.*",
   "ui",
   "ui.*",
+  "runtime",
+  "runtime.*",
+  "state",
+  "state.*",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
+pythonpath = ["."]

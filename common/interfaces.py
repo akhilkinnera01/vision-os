@@ -6,7 +6,15 @@ from typing import Protocol
 
 import numpy as np
 
-from common.models import Decision, Detection, Explanation, SceneContext, SceneFeatures
+from common.models import (
+    Decision,
+    Detection,
+    Explanation,
+    RuntimeMetrics,
+    SceneContext,
+    SceneFeatures,
+    TemporalState,
+)
 
 
 class Detector(Protocol):
@@ -26,25 +34,32 @@ class FeatureBuilderProtocol(Protocol):
 class RuleEngine(Protocol):
     """Contract for modules that infer context labels from features."""
 
-    def infer(self, features: SceneFeatures) -> SceneContext:
+    def infer(self, features: SceneFeatures, temporal_state: TemporalState | None = None) -> SceneContext:
         ...
 
 
 class DecisionEngineProtocol(Protocol):
     """Contract for modules that convert context into final decisions."""
 
-    def decide(self, scene_context: SceneContext, features: SceneFeatures) -> Decision:
+    def decide(
+        self,
+        scene_context: SceneContext,
+        features: SceneFeatures,
+        temporal_state: TemporalState,
+    ) -> Decision:
         ...
 
 
 class Explainer(Protocol):
-    """Contract for modules that produce human-readable reasoning."""
+    """Contract for modules that produce structured reasoning."""
 
     def explain(
         self,
         decision: Decision,
         scene_context: SceneContext,
         features: SceneFeatures,
+        temporal_state: TemporalState,
+        runtime_metrics: RuntimeMetrics,
     ) -> Explanation:
         ...
 
@@ -58,5 +73,6 @@ class Renderer(Protocol):
         detections: list[Detection],
         decision: Decision,
         explanation: Explanation,
+        runtime_metrics: RuntimeMetrics,
     ) -> np.ndarray:
         ...
