@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from common.policy import DecisionPolicy
 from common.models import ContextLabel, SceneContext, SceneFeatures, TemporalState
 
 
 class ContextRulesEngine:
     """Rule-based context inference that is easy to extend or replace."""
+
+    def __init__(self, decision_policy: DecisionPolicy | None = None) -> None:
+        self.decision_policy = decision_policy or DecisionPolicy()
 
     def infer(self, features: SceneFeatures, temporal_state: TemporalState | None = None) -> SceneContext:
         """Map feature combinations to a scene label and supporting signals."""
@@ -22,6 +26,10 @@ class ContextRulesEngine:
             signals.append("laptop is close to the active person")
         if features.phone_near_person:
             signals.append("phone is close to the active person")
+        if features.focused_person_count:
+            signals.append(f"{features.focused_person_count} tracked person is laptop-engaged")
+        if features.distracted_person_count:
+            signals.append(f"{features.distracted_person_count} tracked person is phone-engaged")
         if features.multiple_people_clustered:
             signals.append("multiple people are clustered")
         if features.centered_monitor:
@@ -35,6 +43,7 @@ class ContextRulesEngine:
             1.0,
             min(features.workspace_score / 3.0, 0.65)
             + (0.18 if features.laptop_near_person else 0.0)
+            + min(features.focused_person_count * 0.08, 0.16)
             + min(features.desk_like_score, 0.2),
         )
         collaboration_score = min(
@@ -46,6 +55,7 @@ class ContextRulesEngine:
             1.0,
             min(features.casual_score / 3.0, 0.6)
             + (0.18 if features.phone_near_person else 0.0)
+            + min(features.distracted_person_count * 0.1, 0.2)
             + min(features.room_like_score, 0.18),
         )
 
@@ -59,7 +69,7 @@ class ContextRulesEngine:
             label = ContextLabel.GROUP_ACTIVITY
             confidence = min(0.98, 0.55 + collaboration_score * 0.4)
             confidence_reason = "Multiple nearby people and collaboration cues dominate the window."
-        elif focus_score >= casual_score + 0.08 and focus_score >= collaboration_score - 0.05:
+        elif focus_score >= casual_score + self.decision_policy.focus_margin and focus_score >= collaboration_score - 0.05:
             label = ContextLabel.FOCUSED_WORK
             confidence = min(0.97, 0.52 + focus_score * 0.43)
             confidence_reason = "Work objects and person-device proximity outweigh distraction cues."
@@ -69,7 +79,7 @@ class ContextRulesEngine:
             confidence_reason = "Distraction or room-level cues outweigh sustained work evidence."
 
         if temporal_metrics is not None and temporal_metrics.context_unstable:
-            confidence = max(0.45, confidence - 0.12)
+            confidence = max(0.45, confidence - self.decision_policy.unstable_confidence_penalty)
 
         return SceneContext(
             label=label,

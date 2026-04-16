@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from common.models import Decision, Explanation, RuntimeMetrics, SceneContext, SceneFeatures, TemporalState
+from common.models import (
+    Decision,
+    Explanation,
+    RuntimeMetrics,
+    SceneContext,
+    SceneFeatures,
+    TemporalState,
+    VisionEvent,
+)
 
 
 class ExplanationEngine:
@@ -15,9 +23,11 @@ class ExplanationEngine:
         features: SceneFeatures,
         temporal_state: TemporalState,
         runtime_metrics: RuntimeMetrics,
+        events: list[VisionEvent] | None = None,
     ) -> Explanation:
         """Summarize why the system chose the current scene label."""
         top_signals = list(scene_context.signals[:3]) or ["scene cues are limited"]
+        recent_event_types = [event.event_type for event in (events or [])]
         scores = {
             "focus": round(decision.scene_metrics.focus_score, 3),
             "distraction": round(decision.scene_metrics.distraction_score, 3),
@@ -45,6 +55,10 @@ class ExplanationEngine:
                 f"dropped={runtime_metrics.dropped_frames}"
             ),
             (
+                "Events: "
+                f"{', '.join(recent_event_types) if recent_event_types else 'none'}"
+            ),
+            (
                 "Spatial: "
                 f"laptop_near_person={features.laptop_near_person}, "
                 f"phone_near_person={features.phone_near_person}, "
@@ -60,4 +74,5 @@ class ExplanationEngine:
             compact_summary=compact_summary,
             debug_lines=debug_lines,
             scores=scores,
+            recent_events=recent_event_types,
         )

@@ -1,0 +1,6 @@
+{
+  "labels": ["Focused Work", "Focused Work", "Focused Work", "Group Activity", "Group Activity"],
+  "event_types": ["group_formed", "collaboration_increasing", "context_unstable", "context_stabilized", "group_dispersed"],
+  "max_average_inference_ms": 25.0,
+  "min_stability_score": 0.45
+}

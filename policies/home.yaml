@@ -1,0 +1,27 @@
+name: home
+tracking:
+  max_idle_seconds: 1.2
+  min_iou: 0.22
+  max_center_distance: 0.11
+features:
+  laptop_near_person_distance: 0.2
+  phone_near_person_distance: 0.2
+  people_cluster_reference_distance: 0.38
+  centered_monitor_min_area_ratio: 0.05
+  centered_monitor_axis_score_min: 0.62
+  desk_bottom_half_ratio: 0.3
+temporal:
+  focus_reference_seconds: 7.0
+  distraction_spike_delta: 0.2
+  collaboration_increasing_delta: 0.2
+  instability_threshold: 0.52
+  instability_switch_count: 3
+decision:
+  switch_confirmations: 2
+  focus_margin: 0.09
+  collaboration_margin: 0.02
+  unstable_confidence_penalty: 0.13
+events:
+  focus_sustained_seconds: 5.5
+  distraction_start_threshold: 0.55
+  group_person_count: 2

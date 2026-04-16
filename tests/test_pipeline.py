@@ -18,6 +18,7 @@ from common.models import (
     SceneMetrics,
     SourceMode,
     TemporalState,
+    VisionEvent,
 )
 from context.rules import ContextRulesEngine
 from decision.engine import DecisionEngine
@@ -183,7 +184,20 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
     output_path = tmp_path / "session.jsonl"
     recorder = ReplayRecorder(str(output_path), source_mode=SourceMode.WEBCAM)
     detections = [make_detection("person", (100, 100, 250, 400)), make_detection("laptop", (260, 280, 480, 420))]
-    recorder.write(frame_index=3, timestamp=1.25, frame_shape=(720, 1280), detections=detections)
+    recorder.write(
+        frame_index=3,
+        timestamp=1.25,
+        frame_shape=(720, 1280),
+        detections=detections,
+        events=[
+            VisionEvent(
+                event_type="focus_sustained",
+                timestamp=1.25,
+                description="Focused work held",
+                scene_label="Focused Work",
+            )
+        ],
+    )
     recorder.close()
 
     source = ReplayFrameSource(str(output_path))
@@ -194,6 +208,8 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
     assert packet.frame_index == 3
     assert packet.replay_detections is not None
     assert packet.replay_detections[0].label == "person"
+    assert packet.replay_events is not None
+    assert packet.replay_events[0].event_type == "focus_sustained"
     assert packet.frame.shape == (720, 1280, 3)
 
 
