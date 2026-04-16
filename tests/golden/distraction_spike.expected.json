@@ -1,0 +1,6 @@
+{
+  "labels": ["Focused Work", "Focused Work", "Focused Work"],
+  "event_types": ["distraction_started", "context_unstable", "distraction_resolved", "focus_resumed"],
+  "max_average_inference_ms": 25.0,
+  "min_stability_score": 0.35
+}

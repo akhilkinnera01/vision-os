@@ -18,3 +18,4 @@ recordings/
 demo/*.json
 demo/*.jsonl
 !demo/sample.mp4
+!tests/replays/*.jsonl

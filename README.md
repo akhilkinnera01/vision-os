@@ -8,11 +8,14 @@ detection, and a layered reasoning pipeline that models scene state over time.
 
 - Real-time webcam capture with OpenCV
 - YOLO-based object detection with structured outputs
+- Persistent identity tracking with per-object `track_id` values
 - Spatial reasoning such as person-near-laptop, person-near-phone, clustered people, and centered monitors
 - Temporal scene memory for sustained focus, distraction spikes, collaboration trends, and context instability
+- Typed events for focus, distraction, collaboration, and stability transitions
 - Structured explanations with compact and debug overlays
 - Live scene scores for focus, distraction, collaboration, and stability
-- Replay recording plus benchmark output for deterministic debugging
+- Policy-driven thresholds plus stage-level telemetry
+- Replay recording plus golden regression fixtures for deterministic debugging
 
 ## Project Layout
 
@@ -60,11 +63,14 @@ The first run downloads the default YOLO model weights if they are not already a
 - `--imgsz`: YOLO inference size
 - `--device`: optional inference device such as `cpu`, `mps`, or `0`
 - `--overlay-mode compact|debug`: switch UI density
+- `--policy default|office|home`: load a named threshold policy
+- `--policy-file path/to/policy.yaml`: load a custom policy file
 - `--temporal-window`: rolling memory window in seconds
 - `--record path/to/session.jsonl`: save replayable detections during webcam or video runs
 - `--benchmark-output path/to/metrics.json`: emit machine-readable benchmark output
 - `--max-frames N`: stop after a fixed number of frames
 - `--headless`: disable the OpenCV window for replay or benchmark runs
+- `--log-json`: emit structured JSON logs to stderr
 
 ### Example Workflows
 
@@ -98,6 +104,12 @@ Generated replay and benchmark artifacts inside `demo/` are ignored by git.
 
 Press `q` to exit non-headless runs.
 
+## Policies and Replay Evaluation
+
+- Default runtime thresholds live in `policies/default.yaml`.
+- `policies/office.yaml` and `policies/home.yaml` provide alternate tuned presets.
+- Golden replay fixtures live under `tests/replays/` with expected outputs under `tests/golden/`.
+
 ## Benchmark Output
 
 Vision OS can write benchmark metrics such as processed FPS, average inference latency,
@@ -110,6 +122,8 @@ dropped frames, and decision switch rate. The field definitions live in
 source .venv/bin/activate
 pytest -q
 ```
+
+Golden replay tests are part of the standard pytest run.
 
 ## Design Notes
 
