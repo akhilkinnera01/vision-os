@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 
@@ -76,6 +76,10 @@ class Detection:
     bbox: BoundingBox
     area_ratio: float
     class_id: int | None = None
+    track_id: int | None = None
+
+    def with_track_id(self, track_id: int | None) -> Detection:
+        return replace(self, track_id=track_id)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -84,6 +88,7 @@ class Detection:
             "bbox": self.bbox.to_dict(),
             "area_ratio": self.area_ratio,
             "class_id": self.class_id,
+            "track_id": self.track_id,
         }
 
     @classmethod
@@ -94,7 +99,20 @@ class Detection:
             bbox=BoundingBox.from_dict(dict(payload["bbox"])),
             area_ratio=float(payload["area_ratio"]),
             class_id=None if payload.get("class_id") is None else int(payload["class_id"]),
+            track_id=None if payload.get("track_id") is None else int(payload["track_id"]),
         )
+
+
+@dataclass(slots=True, frozen=True)
+class Track:
+    """Live tracked object identity maintained across nearby frames."""
+
+    track_id: int
+    label: str
+    bbox: BoundingBox
+    confidence: float
+    first_seen_timestamp: float
+    last_seen_timestamp: float
 
 
 @dataclass(slots=True, frozen=True)
@@ -125,6 +143,10 @@ class SceneFeatures:
     person_phone_distance: float = 1.0
     people_cluster_score: float = 0.0
     center_dominance_score: float = 0.0
+    active_track_count: int = 0
+    focused_person_count: int = 0
+    distracted_person_count: int = 0
+    max_person_dwell_seconds: float = 0.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -150,6 +172,8 @@ class RuntimeMetrics:
     fps: float = 0.0
     average_inference_ms: float = 0.0
     dropped_frames: int = 0
+    scene_stability_score: float = 0.0
+    stage_timings: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, float | int]:
         return {
@@ -157,6 +181,8 @@ class RuntimeMetrics:
             "fps": self.fps,
             "average_inference_ms": self.average_inference_ms,
             "dropped_frames": self.dropped_frames,
+            "scene_stability_score": self.scene_stability_score,
+            "stage_timings": self.stage_timings,
         }
 
 
@@ -180,6 +206,31 @@ class TemporalState:
     label_switch_count: int = 0
     notes: list[str] = field(default_factory=list)
     metrics: SceneMetrics = field(default_factory=SceneMetrics)
+
+
+@dataclass(slots=True, frozen=True)
+class ActorState:
+    """Per-track actor summary used for reasoning and event generation."""
+
+    track_id: int
+    label: str
+    first_seen_timestamp: float
+    last_seen_timestamp: float
+    dwell_seconds: float
+    interaction_state: str = "idle"
+    previous_interaction_state: str = "idle"
+    nearby_track_ids: list[int] = field(default_factory=list)
+    focus_score: float = 0.0
+    distraction_score: float = 0.0
+
+
+@dataclass(slots=True, frozen=True)
+class ActorFrameState:
+    """Actor summaries for the current frame plus lifecycle deltas."""
+
+    actors: dict[int, ActorState] = field(default_factory=dict)
+    entered_track_ids: list[int] = field(default_factory=list)
+    departed_track_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)
@@ -216,6 +267,43 @@ class Explanation:
     compact_summary: str
     debug_lines: list[str]
     scores: dict[str, float]
+    recent_events: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True, frozen=True)
+class VisionEvent:
+    """Serializable event emitted by the runtime when state transitions matter."""
+
+    event_type: str
+    timestamp: float
+    description: str
+    category: str = "generic"
+    actor_id: int | None = None
+    scene_label: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "event_type": self.event_type,
+            "timestamp": self.timestamp,
+            "category": self.category,
+            "description": self.description,
+            "actor_id": self.actor_id,
+            "scene_label": self.scene_label,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> VisionEvent:
+        return cls(
+            event_type=str(payload["event_type"]),
+            timestamp=float(payload["timestamp"]),
+            description=str(payload["description"]),
+            category=str(payload.get("category", "generic")),
+            actor_id=None if payload.get("actor_id") is None else int(payload["actor_id"]),
+            scene_label=None if payload.get("scene_label") is None else str(payload["scene_label"]),
+            metadata=dict(payload.get("metadata", {})),
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -227,6 +315,7 @@ class ReplayRecord:
     frame_shape: tuple[int, int]
     detections: list[Detection]
     source_mode: SourceMode
+    events: list[VisionEvent] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -235,6 +324,7 @@ class ReplayRecord:
             "frame_shape": list(self.frame_shape),
             "detections": [detection.to_dict() for detection in self.detections],
             "source_mode": self.source_mode.value,
+            "events": [event.to_dict() for event in self.events],
         }
 
     @classmethod
@@ -245,4 +335,5 @@ class ReplayRecord:
             frame_shape=tuple(int(value) for value in payload["frame_shape"]),
             detections=[Detection.from_dict(item) for item in payload["detections"]],
             source_mode=SourceMode(str(payload["source_mode"])),
+            events=[VisionEvent.from_dict(item) for item in payload.get("events", [])],
         )
