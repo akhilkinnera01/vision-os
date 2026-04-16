@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from common.models import ContextLabel, RuntimeMetrics
 
@@ -77,5 +78,7 @@ class BenchmarkTracker:
         )
 
     def write_summary(self, output_path: str) -> None:
-        with open(output_path, "w", encoding="utf-8") as output_file:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("w", encoding="utf-8") as output_file:
             json.dump(self.summary().to_dict(), output_file, indent=2)
