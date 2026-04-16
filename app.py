@@ -6,41 +6,19 @@ import argparse
 import queue
 import sys
 import threading
-import time
-from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 
 from common.config import VisionOSConfig
-from common.models import (
-    Decision,
-    Detection,
-    Explanation,
-    OverlayMode,
-    RuntimeMetrics,
-    SourceMode,
-)
-from context.rules import ContextRulesEngine
-from decision.engine import DecisionEngine
-from explain.explain import ExplanationEngine
-from features.builder import FeatureBuilder
-from perception.detector import YOLODetector
+from common.models import OverlayMode, SourceMode
+from common.policy import PolicyValidationError, load_policy
 from runtime.benchmark import BenchmarkTracker
+from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import FramePacket, ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
-from state.memory import TemporalMemory
+from telemetry.health import HealthMonitor
+from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
-
-
-@dataclass(slots=True)
-class InferenceOutput:
-    """Bundle the latest inference result for the rendering loop."""
-
-    frame_index: int
-    detections: list[Detection]
-    decision: Decision
-    explanation: Explanation
-    runtime_metrics: RuntimeMetrics
 
 
 def parse_args() -> VisionOSConfig:
@@ -65,6 +43,8 @@ def parse_args() -> VisionOSConfig:
     )
     parser.add_argument("--record", help="Optional path to save replayable detections as JSONL.")
     parser.add_argument("--benchmark-output", help="Optional path to write benchmark metrics as JSON.")
+    parser.add_argument("--policy", default="default", help="Named policy to load from the policies/ directory.")
+    parser.add_argument("--policy-file", help="Optional path to a custom policy YAML file.")
     parser.add_argument(
         "--overlay-mode",
         choices=[mode.value for mode in OverlayMode],
@@ -79,6 +59,7 @@ def parse_args() -> VisionOSConfig:
     )
     parser.add_argument("--max-frames", type=int, default=None, help="Stop after N frames.")
     parser.add_argument("--headless", action="store_true", help="Disable OpenCV window rendering.")
+    parser.add_argument("--log-json", action="store_true", help="Emit structured JSON logs to stderr.")
     args = parser.parse_args()
 
     source_mode = SourceMode(args.source)
@@ -96,10 +77,13 @@ def parse_args() -> VisionOSConfig:
         input_path=args.input,
         record_path=args.record,
         benchmark_output_path=args.benchmark_output,
+        policy_name=args.policy,
+        policy_path=args.policy_file,
         overlay_mode=OverlayMode(args.overlay_mode),
         temporal_window_seconds=args.temporal_window,
         max_frames=args.max_frames,
         headless=args.headless,
+        log_json=args.log_json,
     )
 
 
@@ -190,19 +174,15 @@ def _process_packet(
     )
 
 
-def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer) -> int:
+def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
     if not source.is_opened():
         print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
         source.close()
         return 1
 
-    feature_builder = FeatureBuilder()
-    temporal_memory = TemporalMemory(config.temporal_window_seconds)
-    context_engine = ContextRulesEngine()
-    decision_engine = DecisionEngine()
-    explanation_engine = ExplanationEngine()
     benchmark_tracker = BenchmarkTracker()
+    health_monitor = HealthMonitor()
     recorder = (
         ReplayRecorder(config.record_path, config.source_mode)
         if config.record_path and config.source_mode != SourceMode.REPLAY
@@ -214,24 +194,27 @@ def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer)
     stop_event = threading.Event()
 
     def inference_worker() -> None:
-        detector = YOLODetector(config)
+        pipeline = VisionPipeline(config, policy=policy, benchmark_tracker=benchmark_tracker)
         while not stop_event.is_set():
             try:
                 packet = frame_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
-            output = _process_packet(
-                packet,
-                detector,
-                feature_builder,
-                temporal_memory,
-                context_engine,
-                decision_engine,
-                explanation_engine,
-                benchmark_tracker,
-                recorder,
-            )
-            _queue_latest(result_queue, output)
+            try:
+                output = pipeline.process(packet)
+                if recorder is not None:
+                    recorder.write(
+                        frame_index=packet.frame_index,
+                        timestamp=packet.timestamp,
+                        frame_shape=packet.frame.shape[:2],
+                        detections=output.detections,
+                        events=output.events,
+                    )
+                _queue_latest(result_queue, output)
+            except Exception as exc:  # pragma: no cover - exercised in runtime
+                health_monitor.report_exception("pipeline", exc)
+                stop_event.set()
+                return
 
     worker = threading.Thread(target=inference_worker, name="vision-os-inference", daemon=True)
     worker.start()
@@ -240,6 +223,7 @@ def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer)
 
     try:
         while True:
+            health_monitor.raise_if_unhealthy()
             packet = source.read()
             if packet is None:
                 break
@@ -271,6 +255,7 @@ def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer)
     finally:
         stop_event.set()
         worker.join(timeout=1.0)
+        health_monitor.raise_if_unhealthy()
         source.close()
         if recorder is not None:
             recorder.close()
@@ -279,29 +264,25 @@ def _run_streaming_mode(config: VisionOSConfig, source, renderer: FrameRenderer)
     if config.benchmark_output_path:
         benchmark_tracker.write_summary(config.benchmark_output_path)
     summary = benchmark_tracker.summary()
+    logger.log("run_completed", mode=config.source_mode.value, frames=summary.frames_processed, fps=summary.fps)
     print(f"Benchmark summary: {summary.to_dict()}")
     return 0
 
 
-def _run_sequential_mode(config: VisionOSConfig, source, renderer: FrameRenderer) -> int:
+def _run_sequential_mode(config: VisionOSConfig, policy, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run video or replay modes deterministically without dropping frames."""
     if not source.is_opened():
         print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
         source.close()
         return 1
 
-    feature_builder = FeatureBuilder()
-    temporal_memory = TemporalMemory(config.temporal_window_seconds)
-    context_engine = ContextRulesEngine()
-    decision_engine = DecisionEngine()
-    explanation_engine = ExplanationEngine()
     benchmark_tracker = BenchmarkTracker()
     recorder = (
         ReplayRecorder(config.record_path, config.source_mode)
         if config.record_path and config.source_mode != SourceMode.REPLAY
         else None
     )
-    detector = None if config.source_mode == SourceMode.REPLAY else YOLODetector(config)
+    pipeline = VisionPipeline(config, policy=policy, benchmark_tracker=benchmark_tracker)
 
     processed_frames = 0
     try:
@@ -309,17 +290,15 @@ def _run_sequential_mode(config: VisionOSConfig, source, renderer: FrameRenderer
             packet = source.read()
             if packet is None:
                 break
-            output = _process_packet(
-                packet,
-                detector,
-                feature_builder,
-                temporal_memory,
-                context_engine,
-                decision_engine,
-                explanation_engine,
-                benchmark_tracker,
-                recorder,
-            )
+            output = pipeline.process(packet)
+            if recorder is not None:
+                recorder.write(
+                    frame_index=packet.frame_index,
+                    timestamp=packet.timestamp,
+                    frame_shape=packet.frame.shape[:2],
+                    detections=output.detections,
+                    events=output.events,
+                )
             processed_frames += 1
 
             if not config.headless:
@@ -346,6 +325,7 @@ def _run_sequential_mode(config: VisionOSConfig, source, renderer: FrameRenderer
     if config.benchmark_output_path:
         benchmark_tracker.write_summary(config.benchmark_output_path)
     summary = benchmark_tracker.summary()
+    logger.log("run_completed", mode=config.source_mode.value, frames=summary.frames_processed, fps=summary.fps)
     print(f"Benchmark summary: {summary.to_dict()}")
     return 0
 
@@ -355,15 +335,18 @@ def main() -> int:
     try:
         config = parse_args()
         _validate_input_path(config)
+        policy = load_policy(name=config.policy_name, path=config.policy_path)
+        logger = VisionLogger(config.log_json)
         renderer = FrameRenderer(config.overlay_mode)
         source = _build_source(config)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, PolicyValidationError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
+    logger.log("run_started", mode=config.source_mode.value, policy=policy.name)
     if config.source_mode == SourceMode.WEBCAM and not config.headless:
-        return _run_streaming_mode(config, source, renderer)
-    return _run_sequential_mode(config, source, renderer)
+        return _run_streaming_mode(config, policy, source, renderer, logger)
+    return _run_sequential_mode(config, policy, source, renderer, logger)
 
 
 if __name__ == "__main__":

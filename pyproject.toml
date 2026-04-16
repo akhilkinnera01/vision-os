@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vision-os"
-version = "0.1.0"
+version = "0.3.0"
 description = "Real-time scene understanding with OpenCV and Ultralytics YOLO."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,7 @@ authors = [
 dependencies = [
   "numpy>=1.26.0",
   "opencv-python>=4.9.0",
+  "PyYAML>=6.0",
   "ultralytics>=8.3.0",
 ]
 
@@ -43,7 +44,18 @@ include = [
   "runtime.*",
   "state",
   "state.*",
+  "tracking",
+  "tracking.*",
+  "events",
+  "events.*",
+  "telemetry",
+  "telemetry.*",
+  "policies",
+  "policies.*",
 ]
+
+[tool.setuptools.package-data]
+policies = ["*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

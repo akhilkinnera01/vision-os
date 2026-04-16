@@ -21,7 +21,10 @@ class VisionOSConfig:
     input_path: str | None = None
     record_path: str | None = None
     benchmark_output_path: str | None = None
+    policy_name: str = "default"
+    policy_path: str | None = None
     overlay_mode: OverlayMode = OverlayMode.COMPACT
     temporal_window_seconds: float = 8.0
     max_frames: int | None = None
     headless: bool = False
+    log_json: bool = False

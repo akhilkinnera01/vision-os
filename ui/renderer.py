@@ -41,7 +41,8 @@ class FrameRenderer:
                 self.BOX_COLOR,
                 2,
             )
-            label = f"{detection.label} {detection.confidence:.2f}"
+            label_prefix = f"{detection.label}#{detection.track_id}" if detection.track_id is not None else detection.label
+            label = f"{label_prefix} {detection.confidence:.2f}"
             cv2.putText(
                 annotated,
                 label,
@@ -139,6 +140,17 @@ class FrameRenderer:
                     frame,
                     f"Risks: {', '.join(explanation.risk_flags)}",
                     (16, min(panel_height - 12, current_y + 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.46,
+                    self.RISK_COLOR,
+                    1,
+                    cv2.LINE_AA,
+                )
+            if explanation.recent_events:
+                cv2.putText(
+                    frame,
+                    f"Events: {', '.join(explanation.recent_events)}",
+                    (16, min(panel_height - 30, current_y + 24)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.46,
                     self.RISK_COLOR,
