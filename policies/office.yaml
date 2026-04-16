@@ -1,0 +1,27 @@
+name: office
+tracking:
+  max_idle_seconds: 1.8
+  min_iou: 0.18
+  max_center_distance: 0.13
+features:
+  laptop_near_person_distance: 0.24
+  phone_near_person_distance: 0.17
+  people_cluster_reference_distance: 0.32
+  centered_monitor_min_area_ratio: 0.06
+  centered_monitor_axis_score_min: 0.66
+  desk_bottom_half_ratio: 0.34
+temporal:
+  focus_reference_seconds: 8.5
+  distraction_spike_delta: 0.2
+  collaboration_increasing_delta: 0.16
+  instability_threshold: 0.48
+  instability_switch_count: 3
+decision:
+  switch_confirmations: 2
+  focus_margin: 0.07
+  collaboration_margin: 0.03
+  unstable_confidence_penalty: 0.1
+events:
+  focus_sustained_seconds: 6.5
+  distraction_start_threshold: 0.58
+  group_person_count: 2
