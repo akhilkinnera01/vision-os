@@ -36,8 +36,9 @@ class ExplanationEngine:
         }
 
         compact_summary = (
-            f"{decision.label.value} | focus {scores['focus']:.2f} | "
-            f"distraction {scores['distraction']:.2f} | stability {scores['stability']:.2f}"
+            scene_context.confidence_reason
+            if scene_context.confidence_reason
+            else f"Top signals: {', '.join(top_signals[:2])}"
         )
         debug_lines = [
             f"Top signals: {', '.join(top_signals)}",
