@@ -1,18 +1,18 @@
 # Vision OS
 
-Vision OS is a modular Python project for real-time scene understanding with a webcam.
-It uses OpenCV for video capture, Ultralytics YOLO for object detection, and a small
-reasoning pipeline that turns detections into scene labels such as `Focused Work`,
-`Casual Use`, and `Group Activity`.
+Vision OS is a modular Python project for real-time scene understanding with a webcam,
+video file, or replay artifact. It uses OpenCV for capture, Ultralytics YOLO for object
+detection, and a layered reasoning pipeline that models scene state over time.
 
 ## Highlights
 
 - Real-time webcam capture with OpenCV
 - YOLO-based object detection with structured outputs
-- Feature extraction layer for booleans, counts, and lightweight scores
-- Rule-based scene context inference and decision engine
-- Human-readable explanation generation
-- UI overlays for boxes, labels, scene summary, and reasoning
+- Spatial reasoning such as person-near-laptop, person-near-phone, clustered people, and centered monitors
+- Temporal scene memory for sustained focus, distraction spikes, collaboration trends, and context instability
+- Structured explanations with compact and debug overlays
+- Live scene scores for focus, distraction, collaboration, and stability
+- Replay recording plus benchmark output for deterministic debugging
 
 ## Project Layout
 
@@ -20,22 +20,16 @@ reasoning pipeline that turns detections into scene labels such as `Focused Work
 vision-os/
 ├── app.py
 ├── common/
-│   ├── config.py
-│   └── models.py
 ├── perception/
-│   └── detector.py
 ├── features/
-│   └── builder.py
+├── state/
 ├── context/
-│   └── rules.py
 ├── decision/
-│   └── engine.py
 ├── explain/
-│   └── explain.py
+├── runtime/
 ├── ui/
-│   └── renderer.py
+├── docs/
 └── tests/
-    └── test_pipeline.py
 ```
 
 ## Setup
@@ -51,32 +45,77 @@ The first run downloads the default YOLO model weights if they are not already a
 
 ## Run
 
-```bash
-python app.py --camera 0 --model yolov8n.pt
-```
+### Mode Matrix
 
-Useful flags:
+| Mode | Command | Use it for |
+| --- | --- | --- |
+| Webcam | `python app.py --source webcam --camera 0` | live monitoring |
+| Video | `python app.py --source video --input path/to/file.avi` | deterministic demos |
+| Replay | `python app.py --source replay --input path/to/session.jsonl --headless` | reasoning playback and debugging |
 
-- `--camera`: webcam index, default `0`
-- `--model`: YOLO weights, default `yolov8n.pt`
+### Common Flags
+
+- `--model`: YOLO weights path or name, default `yolov8n.pt`
 - `--conf`: detection confidence threshold
 - `--imgsz`: YOLO inference size
 - `--device`: optional inference device such as `cpu`, `mps`, or `0`
+- `--overlay-mode compact|debug`: switch UI density
+- `--temporal-window`: rolling memory window in seconds
+- `--record path/to/session.jsonl`: save replayable detections during webcam or video runs
+- `--benchmark-output path/to/metrics.json`: emit machine-readable benchmark output
+- `--max-frames N`: stop after a fixed number of frames
+- `--headless`: disable the OpenCV window for replay or benchmark runs
 
-Press `q` to exit.
+### Example Workflows
+
+Run the live webcam UI:
+
+```bash
+python app.py --source webcam --camera 0 --model yolov8n.pt
+```
+
+Process a local video, emit a benchmark file, and save a replay artifact:
+
+```bash
+python app.py \
+  --source video \
+  --input /tmp/demo.avi \
+  --record /tmp/demo-replay.jsonl \
+  --benchmark-output /tmp/demo-benchmark.json
+```
+
+Replay the saved detections in debug mode:
+
+```bash
+python app.py \
+  --source replay \
+  --input /tmp/demo-replay.jsonl \
+  --overlay-mode debug
+```
+
+Press `q` to exit non-headless runs.
+
+## Benchmark Output
+
+Vision OS can write benchmark metrics such as processed FPS, average inference latency,
+dropped frames, and decision switch rate. The field definitions live in
+[`docs/benchmark-output.md`](docs/benchmark-output.md).
 
 ## Testing
 
 ```bash
-pytest
+source .venv/bin/activate
+pytest -q
 ```
 
 ## Design Notes
 
-- The perception layer is isolated from the reasoning stack so the detector can be swapped later.
-- Shared dataclasses keep modules loosely coupled and easy to test.
-- Scene labels are inferred from simple heuristics that can later be replaced by learned policies.
-- The renderer is intentionally separate so UI styling can evolve without touching inference logic.
+- `perception/` stays detection-only.
+- `features/` is frame-local and spatial.
+- `state/` owns rolling temporal memory and live scene metrics.
+- `context/` remains stateless and maps features plus temporal state to labels.
+- `decision/` owns final action selection and hysteresis.
+- `explain/` and `ui/` stay presentation-focused.
 
 ## Open Source Workflow
 

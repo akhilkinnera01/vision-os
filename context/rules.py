@@ -2,48 +2,78 @@
 
 from __future__ import annotations
 
-from common.models import ContextLabel, SceneContext, SceneFeatures
+from common.models import ContextLabel, SceneContext, SceneFeatures, TemporalState
 
 
 class ContextRulesEngine:
     """Rule-based context inference that is easy to extend or replace."""
 
-    def infer(self, features: SceneFeatures) -> SceneContext:
+    def infer(self, features: SceneFeatures, temporal_state: TemporalState | None = None) -> SceneContext:
         """Map feature combinations to a scene label and supporting signals."""
         signals: list[str] = []
+        temporal_metrics = temporal_state.metrics if temporal_state else None
 
         if features.person_count >= 2:
             signals.append(f"{features.person_count} people are visible")
         elif features.person_count == 1:
             signals.append("a single person is visible")
 
-        if features.has_laptop:
-            signals.append("a laptop is present")
-        if features.has_keyboard:
-            signals.append("a keyboard is visible")
-        if features.has_phone:
-            signals.append("a phone is present")
+        if features.laptop_near_person:
+            signals.append("laptop is close to the active person")
+        if features.phone_near_person:
+            signals.append("phone is close to the active person")
+        if features.multiple_people_clustered:
+            signals.append("multiple people are clustered")
+        if features.centered_monitor:
+            signals.append("monitor is dominant near the center")
+        if features.desk_like_score >= 0.45:
+            signals.append("scene looks desk-like")
+        if features.room_like_score >= 0.45:
+            signals.append("scene looks room-like")
 
-        if features.person_count >= 2 and features.collaboration_score >= 2.0:
-            confidence = min(0.99, 0.65 + 0.08 * features.person_count)
-            return SceneContext(
-                label=ContextLabel.GROUP_ACTIVITY,
-                confidence=confidence,
-                signals=signals or ["multiple people suggest collaboration"],
-            )
+        focus_score = min(
+            1.0,
+            min(features.workspace_score / 3.0, 0.65)
+            + (0.18 if features.laptop_near_person else 0.0)
+            + min(features.desk_like_score, 0.2),
+        )
+        collaboration_score = min(
+            1.0,
+            min(features.collaboration_score / 3.0, 0.6)
+            + (0.2 if features.multiple_people_clustered else 0.0),
+        )
+        casual_score = min(
+            1.0,
+            min(features.casual_score / 3.0, 0.6)
+            + (0.18 if features.phone_near_person else 0.0)
+            + min(features.room_like_score, 0.18),
+        )
 
-        if features.person_count >= 1 and features.workspace_score >= 1.6:
-            confidence = min(0.96, 0.55 + 0.1 * features.workspace_score)
-            return SceneContext(
-                label=ContextLabel.FOCUSED_WORK,
-                confidence=confidence,
-                signals=signals or ["work-oriented objects dominate the frame"],
-            )
+        if temporal_metrics is not None:
+            focus_score = focus_score * 0.7 + temporal_metrics.focus_score * 0.3
+            collaboration_score = collaboration_score * 0.75 + temporal_metrics.collaboration_score * 0.25
+            casual_score = casual_score * 0.75 + temporal_metrics.distraction_score * 0.25
+            signals.extend(note for note in temporal_state.notes if note not in signals)
 
-        confidence = min(0.9, 0.5 + 0.08 * max(features.casual_score, 1.0))
-        fallback_signals = signals or [f"{features.dominant_label} is the strongest cue in view"]
+        if features.person_count >= 2 and collaboration_score >= max(focus_score, casual_score) - 0.02:
+            label = ContextLabel.GROUP_ACTIVITY
+            confidence = min(0.98, 0.55 + collaboration_score * 0.4)
+            confidence_reason = "Multiple nearby people and collaboration cues dominate the window."
+        elif focus_score >= casual_score + 0.08 and focus_score >= collaboration_score - 0.05:
+            label = ContextLabel.FOCUSED_WORK
+            confidence = min(0.97, 0.52 + focus_score * 0.43)
+            confidence_reason = "Work objects and person-device proximity outweigh distraction cues."
+        else:
+            label = ContextLabel.CASUAL_USE
+            confidence = min(0.94, 0.5 + casual_score * 0.4)
+            confidence_reason = "Distraction or room-level cues outweigh sustained work evidence."
+
+        if temporal_metrics is not None and temporal_metrics.context_unstable:
+            confidence = max(0.45, confidence - 0.12)
+
         return SceneContext(
-            label=ContextLabel.CASUAL_USE,
-            confidence=confidence,
-            signals=fallback_signals,
+            label=label,
+            confidence=round(confidence, 3),
+            signals=signals[:5] if signals else [f"{features.dominant_label} is the strongest cue in view"],
+            confidence_reason=confidence_reason,
         )

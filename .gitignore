@@ -9,4 +9,9 @@ build/
 dist/
 *.egg-info/
 runs/
-
+yolov8n.pt
+*.jsonl
+*.avi
+*.mp4
+benchmarks/
+recordings/
