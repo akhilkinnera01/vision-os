@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from common.models import ContextLabel, Decision, SceneContext, SceneFeatures, TemporalState
+from common.policy import DecisionPolicy
 
 
 class DecisionEngine:
@@ -14,8 +15,9 @@ class DecisionEngine:
         ContextLabel.GROUP_ACTIVITY: "Highlight collaborative activity",
     }
 
-    def __init__(self, switch_confirmations: int = 2) -> None:
-        self.switch_confirmations = max(1, switch_confirmations)
+    def __init__(self, switch_confirmations: int = 2, policy: DecisionPolicy | None = None) -> None:
+        self.policy = policy or DecisionPolicy(switch_confirmations=switch_confirmations)
+        self.switch_confirmations = max(1, self.policy.switch_confirmations)
         self._active_label: ContextLabel | None = None
         self._candidate_label: ContextLabel | None = None
         self._candidate_hits = 0

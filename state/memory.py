@@ -6,13 +6,15 @@ from collections import Counter, deque
 from statistics import mean
 
 from common.models import ContextLabel, SceneFeatures, SceneMetrics, TemporalSnapshot, TemporalState
+from common.policy import TemporalPolicy
 
 
 class TemporalMemory:
     """Track a short history of feature snapshots to infer scene behavior over time."""
 
-    def __init__(self, window_seconds: float = 8.0) -> None:
+    def __init__(self, window_seconds: float = 8.0, policy: TemporalPolicy | None = None) -> None:
         self.window_seconds = max(1.0, window_seconds)
+        self.policy = policy or TemporalPolicy()
         self._history: deque[TemporalSnapshot] = deque()
 
     def update(
@@ -55,9 +57,13 @@ class TemporalMemory:
             self._normalize_collaboration(snapshot.features) for snapshot in self._history
         ]
 
-        focus_score = min(1.0, focus_values[-1] * 0.65 + min(focus_duration / 8.0, 1.0) * 0.35)
+        focus_score = min(
+            1.0,
+            focus_values[-1] * 0.65
+            + min(focus_duration / max(self.policy.focus_reference_seconds, 1.0), 1.0) * 0.35,
+        )
         distraction_baseline = mean(distraction_values[:-1]) if len(distraction_values) > 1 else 0.0
-        distraction_spike = distraction_values[-1] > distraction_baseline + 0.22
+        distraction_spike = distraction_values[-1] > distraction_baseline + self.policy.distraction_spike_delta
         distraction_score = min(
             1.0,
             distraction_values[-1] + (0.15 if distraction_spike else 0.0),
@@ -65,7 +71,7 @@ class TemporalMemory:
 
         collaboration_now = collaboration_values[-1]
         early_collaboration = mean(collaboration_values[:-1]) if len(collaboration_values) > 1 else 0.0
-        collaboration_increasing = collaboration_now > early_collaboration + 0.18
+        collaboration_increasing = collaboration_now > early_collaboration + self.policy.collaboration_increasing_delta
         collaboration_score = min(
             1.0,
             collaboration_now + (0.12 if collaboration_increasing else 0.0),
@@ -74,7 +80,10 @@ class TemporalMemory:
         label_agreement = label_counts[dominant_label] / len(self._history)
         confidence_average = mean(snapshot.confidence for snapshot in self._history)
         stability_score = max(0.0, min(1.0, label_agreement * 0.7 + confidence_average * 0.3 - min(switch_rate / 4.0, 0.4)))
-        context_unstable = stability_score < 0.5 or switch_count >= 3
+        context_unstable = (
+            stability_score < self.policy.instability_threshold
+            or switch_count >= self.policy.instability_switch_count
+        )
 
         notes: list[str] = []
         if dominant_duration > 0:
@@ -129,6 +138,7 @@ class TemporalMemory:
             0.22 * features.person_count
             + min(features.workspace_score / 3.0, 0.55)
             + (0.15 if features.laptop_near_person else 0.0)
+            + min(features.focused_person_count * 0.08, 0.16)
             + (0.1 if features.centered_monitor else 0.0)
             + min(features.desk_like_score, 0.18),
         )
@@ -138,6 +148,7 @@ class TemporalMemory:
             1.0,
             min(features.casual_score / 3.0, 0.55)
             + (0.2 if features.phone_near_person else 0.0)
+            + min(features.distracted_person_count * 0.1, 0.2)
             + min(features.room_like_score, 0.2),
         )
 

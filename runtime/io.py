@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from common.models import Detection, ReplayRecord, SourceMode
+from common.models import Detection, ReplayRecord, SourceMode, VisionEvent
 
 
 def _ensure_parent_directory(path: Path) -> None:
@@ -27,6 +27,7 @@ class FramePacket:
     frame: np.ndarray
     source_mode: SourceMode
     replay_detections: list[Detection] | None = None
+    replay_events: list[VisionEvent] | None = None
 
 
 class WebcamFrameSource:
@@ -109,6 +110,7 @@ class ReplayFrameSource:
             frame=frame,
             source_mode=SourceMode.REPLAY,
             replay_detections=record.detections,
+            replay_events=record.events,
         )
 
     def is_opened(self) -> bool:
@@ -133,6 +135,7 @@ class ReplayRecorder:
         timestamp: float,
         frame_shape: tuple[int, int],
         detections: list[Detection],
+        events: list[VisionEvent] | None = None,
     ) -> None:
         record = ReplayRecord(
             frame_index=frame_index,
@@ -140,6 +143,7 @@ class ReplayRecorder:
             frame_shape=frame_shape,
             detections=detections,
             source_mode=self._source_mode,
+            events=events or [],
         )
         self._file.write(json.dumps(record.to_dict()) + "\n")
         self._file.flush()

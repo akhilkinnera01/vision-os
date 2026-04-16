@@ -6,7 +6,8 @@ from collections import Counter
 from itertools import combinations
 from math import dist, sqrt
 
-from common.models import Detection, SceneFeatures
+from common.models import ActorFrameState, Detection, SceneFeatures
+from common.policy import FeaturePolicy
 
 
 class FeatureBuilder:
@@ -15,7 +16,15 @@ class FeatureBuilder:
     DESK_OBJECTS = {"laptop", "keyboard", "mouse", "book", "chair", "monitor", "tv"}
     ROOM_OBJECTS = {"couch", "bed", "tv", "remote", "cell phone"}
 
-    def build(self, detections: list[Detection], frame_shape: tuple[int, int]) -> SceneFeatures:
+    def __init__(self, policy: FeaturePolicy | None = None) -> None:
+        self.policy = policy or FeaturePolicy()
+
+    def build(
+        self,
+        detections: list[Detection],
+        frame_shape: tuple[int, int],
+        actor_frame_state: ActorFrameState | None = None,
+    ) -> SceneFeatures:
         """Aggregate detections into a compact feature set for reasoning."""
         counts = Counter(detection.label for detection in detections)
         occupied_ratio = min(sum(detection.area_ratio for detection in detections), 1.0)
@@ -60,10 +69,28 @@ class FeatureBuilder:
             candidate_score = detection.area_ratio * 4.0 + (x_score + y_score) / 2.0
             if candidate_score > center_dominance_score:
                 center_dominance_score = candidate_score
-                centered_monitor = detection.area_ratio > 0.05 and x_score > 0.65 and y_score > 0.65
+                centered_monitor = (
+                    detection.area_ratio > self.policy.centered_monitor_min_area_ratio
+                    and x_score > self.policy.centered_monitor_axis_score_min
+                    and y_score > self.policy.centered_monitor_axis_score_min
+                )
 
-        desk_like_score = self._desk_like_score(detections)
+        desk_like_score = self._desk_like_score(detections, frame_shape)
         room_like_score = self._room_like_score(detections)
+        focused_person_count = 0
+        distracted_person_count = 0
+        max_person_dwell_seconds = 0.0
+        if actor_frame_state is not None:
+            focused_person_count = sum(
+                1 for actor in actor_frame_state.actors.values() if actor.interaction_state == "laptop_engaged"
+            )
+            distracted_person_count = sum(
+                1 for actor in actor_frame_state.actors.values() if actor.interaction_state == "phone_engaged"
+            )
+            max_person_dwell_seconds = max(
+                (actor.dwell_seconds for actor in actor_frame_state.actors.values()),
+                default=0.0,
+            )
 
         return SceneFeatures(
             counts=dict(counts),
@@ -80,8 +107,8 @@ class FeatureBuilder:
             casual_score=casual_score,
             occupied_ratio=occupied_ratio,
             dominant_label=dominant_label,
-            laptop_near_person=person_laptop_distance < 0.22,
-            phone_near_person=person_phone_distance < 0.18,
+            laptop_near_person=person_laptop_distance < self.policy.laptop_near_person_distance,
+            phone_near_person=person_phone_distance < self.policy.phone_near_person_distance,
             multiple_people_clustered=people_cluster_score > 0.55,
             centered_monitor=centered_monitor,
             desk_like_score=desk_like_score,
@@ -90,6 +117,10 @@ class FeatureBuilder:
             person_phone_distance=round(person_phone_distance, 3),
             people_cluster_score=round(people_cluster_score, 3),
             center_dominance_score=round(center_dominance_score, 3),
+            active_track_count=len({detection.track_id for detection in detections if detection.track_id is not None}),
+            focused_person_count=focused_person_count,
+            distracted_person_count=distracted_person_count,
+            max_person_dwell_seconds=round(max_person_dwell_seconds, 2),
         )
 
     def _nearest_normalized_distance(
@@ -113,17 +144,18 @@ class FeatureBuilder:
             dist(left.bbox.center, right.bbox.center) for left, right in combinations(people, 2)
         ) / len(list(combinations(people, 2)))
         normalized_distance = average_distance / max(diagonal, 1.0)
-        return max(0.0, 1.0 - normalized_distance / 0.35)
+        return max(0.0, 1.0 - normalized_distance / self.policy.people_cluster_reference_distance)
 
-    def _desk_like_score(self, detections: list[Detection]) -> float:
+    def _desk_like_score(self, detections: list[Detection], frame_shape: tuple[int, int]) -> float:
         if not detections:
             return 0.0
         bottom_half_objects = 0
         desk_objects = 0
+        bottom_threshold = frame_shape[0] * self.policy.desk_bottom_half_ratio
         for detection in detections:
             if detection.label in self.DESK_OBJECTS:
                 desk_objects += 1
-                if detection.bbox.center[1] >= 240:
+                if detection.bbox.center[1] >= bottom_threshold:
                     bottom_half_objects += 1
         return min(1.0, desk_objects * 0.2 + bottom_half_objects * 0.12)
 
