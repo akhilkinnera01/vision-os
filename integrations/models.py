@@ -34,6 +34,60 @@ class IntegrationConfig:
 
 
 @dataclass(slots=True, frozen=True)
+class IntegrationEnvelope:
+    """One structured outbound message emitted by the generic integration layer."""
+
+    source: str
+    timestamp: float
+    source_mode: str
+    scene_label: str | None
+    confidence: float | None
+    profile_id: str | None = None
+    metrics: dict[str, object] = field(default_factory=dict)
+    risk_flags: tuple[str, ...] = ()
+    payload: dict[str, object] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "timestamp": self.timestamp,
+            "source_mode": self.source_mode,
+            "scene_label": self.scene_label,
+            "confidence": self.confidence,
+            "profile_id": self.profile_id,
+            "metrics": self.metrics,
+            "risk_flags": list(self.risk_flags),
+            "payload": self.payload,
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class DispatchRecord:
+    """One attempted generic integration dispatch."""
+
+    integration_id: str
+    target_type: str
+    source: str
+    timestamp: float
+    target: str | None
+    payload: dict[str, object]
+    success: bool
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "integration_id": self.integration_id,
+            "target_type": self.target_type,
+            "source": self.source,
+            "timestamp": self.timestamp,
+            "target": self.target,
+            "payload": self.payload,
+            "success": self.success,
+            "error": self.error,
+        }
+
+
+@dataclass(slots=True, frozen=True)
 class TriggerCondition:
     """One declarative condition checked against runtime state."""
 

@@ -1,10 +1,12 @@
 """Trigger and downstream integration helpers."""
 
 from integrations.config import IntegrationConfigError, load_integration_config, load_trigger_config
-from integrations.dispatcher import TriggerDispatcher
+from integrations.dispatcher import IntegrationDispatcher, TriggerDispatcher
 from integrations.engine import TriggerEngine
 from integrations.models import (
+    DispatchRecord,
     IntegrationConfig,
+    IntegrationEnvelope,
     IntegrationTarget,
     TriggerAction,
     TriggerCondition,
@@ -14,8 +16,11 @@ from integrations.models import (
 )
 
 __all__ = [
+    "DispatchRecord",
     "IntegrationConfig",
     "IntegrationConfigError",
+    "IntegrationDispatcher",
+    "IntegrationEnvelope",
     "IntegrationTarget",
     "TriggerDispatcher",
     "TriggerAction",
