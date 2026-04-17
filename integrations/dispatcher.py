@@ -68,7 +68,7 @@ class TriggerDispatcher:
                 )
                 continue
             if action.action_type == "webhook":
-                error = self._post_webhook(action.target or "", payload_bytes)
+                error = self._post_webhook(action.target or "", action.method, payload_bytes)
                 records.append(
                     TriggeredActionRecord(
                         trigger_id=rule.rule_id,
@@ -105,8 +105,8 @@ class TriggerDispatcher:
         with target.open("ab") as handle:
             handle.write(payload + b"\n")
 
-    def _post_webhook(self, url: str, payload: bytes) -> str | None:
-        request = Request(url=url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    def _post_webhook(self, url: str, method: str, payload: bytes) -> str | None:
+        request = Request(url=url, data=payload, headers={"Content-Type": "application/json"}, method=method)
         try:
             with urlopen(request, timeout=2.0):
                 return None

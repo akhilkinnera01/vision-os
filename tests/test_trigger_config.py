@@ -185,3 +185,46 @@ triggers:
 
     with pytest.raises(IntegrationConfigError, match="unsupported operator"):
         load_trigger_config(str(config_path))
+
+
+def test_load_trigger_config_rejects_invalid_webhook_url_scheme(tmp_path: Path) -> None:
+    config_path = tmp_path / "triggers.yaml"
+    config_path.write_text(
+        """
+triggers:
+  - id: bad-webhook-url
+    when:
+      source: decision.label
+      operator: equals
+      value: Focused Work
+    then:
+      - type: webhook
+        url: file:///tmp/not-allowed
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(IntegrationConfigError, match="http\\(s\\) URL"):
+        load_trigger_config(str(config_path))
+
+
+def test_load_trigger_config_rejects_unsupported_webhook_method(tmp_path: Path) -> None:
+    config_path = tmp_path / "triggers.yaml"
+    config_path.write_text(
+        """
+triggers:
+  - id: bad-webhook-method
+    when:
+      source: decision.label
+      operator: equals
+      value: Focused Work
+    then:
+      - type: webhook
+        url: https://example.invalid/hook
+        method: TRACE
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(IntegrationConfigError, match="unsupported method"):
+        load_trigger_config(str(config_path))

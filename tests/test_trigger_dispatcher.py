@@ -63,6 +63,39 @@ def test_dispatcher_logs_failure_and_continues_to_other_actions(
     assert (tmp_path / "events.jsonl").is_file()
 
 
+def test_dispatcher_uses_configured_webhook_method(monkeypatch) -> None:
+    captured_request = None
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    def _fake_urlopen(request, timeout: float):
+        nonlocal captured_request
+        captured_request = request
+        assert timeout == 2.0
+        return _Response()
+
+    rule = TriggerRule(
+        rule_id="focus-session",
+        actions=(TriggerAction(action_type="webhook", target="https://example.invalid/hook", method="PATCH"),),
+    )
+    dispatcher = TriggerDispatcher()
+
+    monkeypatch.setattr("integrations.dispatcher.urlopen", _fake_urlopen)
+
+    records = dispatcher.dispatch(rule, timestamp=5.0, payload={"trigger_id": "focus-session"})
+
+    assert len(records) == 1
+    assert records[0].action_type == "webhook"
+    assert records[0].success is True
+    assert captured_request is not None
+    assert captured_request.get_method() == "PATCH"
+
+
 def test_dispatcher_supports_structured_log_actions(capsys) -> None:
     rule = TriggerRule(
         rule_id="focus-session",
