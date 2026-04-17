@@ -57,6 +57,7 @@ class RuntimeProfile:
     policy_path: str | None = None
     zones_path: str | None = None
     trigger_path: str | None = None
+    integrations_path: str | None = None
     scene_labels: tuple[str, ...] = ()
     presentation: ProfilePresentation = ProfilePresentation()
 
@@ -77,6 +78,11 @@ def load_profile(name: str | None = None, path: str | None = None) -> RuntimePro
     policy_name, policy_path = _resolve_policy_reference(payload, base_dir=profile_path.parent)
     trigger_path = _resolve_optional_path(profile_path.parent, payload.get("trigger_file"), field_name="trigger_file")
     zones_path = _resolve_optional_path(profile_path.parent, payload.get("zones_file"), field_name="zones_file")
+    integrations_path = _resolve_optional_path(
+        profile_path.parent,
+        payload.get("integration_file"),
+        field_name="integration_file",
+    )
     scene_labels = _string_list(payload.get("scene_labels", []), field_name="scene_labels")
     _validate_scene_labels(scene_labels)
     presentation = _parse_presentation(payload.get("presentation", {}), profile_id)
@@ -89,6 +95,7 @@ def load_profile(name: str | None = None, path: str | None = None) -> RuntimePro
         policy_path=policy_path,
         zones_path=zones_path,
         trigger_path=trigger_path,
+        integrations_path=integrations_path,
         scene_labels=tuple(scene_labels),
         presentation=presentation,
     )

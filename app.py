@@ -199,6 +199,8 @@ def _apply_profile_defaults(config: VisionOSConfig, profile: RuntimeProfile) -> 
         resolved = replace(resolved, zones_path=profile.zones_path)
     if not resolved.trigger_explicit and profile.trigger_path is not None:
         resolved = replace(resolved, trigger_path=profile.trigger_path)
+    if not resolved.integrations_explicit and profile.integrations_path is not None:
+        resolved = replace(resolved, integrations_path=profile.integrations_path)
     if not resolved.overlay_mode_explicit:
         resolved = replace(resolved, overlay_mode=profile.presentation.overlay_mode)
     return resolved

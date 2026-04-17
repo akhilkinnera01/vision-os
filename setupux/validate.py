@@ -129,6 +129,8 @@ def _apply_profile_defaults_for_validation(config: VisionOSConfig, profile: Runt
         resolved = replace(resolved, zones_path=profile.zones_path)
     if not resolved.trigger_explicit and profile.trigger_path is not None:
         resolved = replace(resolved, trigger_path=profile.trigger_path)
+    if not resolved.integrations_explicit and profile.integrations_path is not None:
+        resolved = replace(resolved, integrations_path=profile.integrations_path)
     return resolved
 
 

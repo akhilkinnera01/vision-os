@@ -100,6 +100,7 @@ def test_apply_profile_defaults_fills_implicit_settings() -> None:
         policy_name="office",
         zones_path="/tmp/zones.yaml",
         trigger_path="/tmp/triggers.yaml",
+        integrations_path="/tmp/integrations.yaml",
         presentation=ProfilePresentation(overlay_mode=OverlayMode.DEBUG),
     )
 
@@ -108,6 +109,7 @@ def test_apply_profile_defaults_fills_implicit_settings() -> None:
     assert resolved.policy_name == "office"
     assert resolved.zones_path == "/tmp/zones.yaml"
     assert resolved.trigger_path == "/tmp/triggers.yaml"
+    assert resolved.integrations_path == "/tmp/integrations.yaml"
     assert resolved.overlay_mode == OverlayMode.DEBUG
 
 
@@ -118,10 +120,12 @@ def test_apply_profile_defaults_preserves_explicit_settings() -> None:
         policy_name="default",
         zones_path="config/zones.yaml",
         trigger_path="config/triggers.yaml",
+        integrations_path="config/integrations.yaml",
         overlay_mode=OverlayMode.COMPACT,
         policy_explicit=True,
         zones_explicit=True,
         trigger_explicit=True,
+        integrations_explicit=True,
         overlay_mode_explicit=True,
     )
     profile = RuntimeProfile(
@@ -131,6 +135,7 @@ def test_apply_profile_defaults_preserves_explicit_settings() -> None:
         policy_name="office",
         zones_path="/tmp/zones.yaml",
         trigger_path="/tmp/triggers.yaml",
+        integrations_path="/tmp/integrations.yaml",
         presentation=ProfilePresentation(overlay_mode=OverlayMode.DEBUG),
     )
 
@@ -139,6 +144,7 @@ def test_apply_profile_defaults_preserves_explicit_settings() -> None:
     assert resolved.policy_name == "default"
     assert resolved.zones_path == "config/zones.yaml"
     assert resolved.trigger_path == "config/triggers.yaml"
+    assert resolved.integrations_path == "config/integrations.yaml"
     assert resolved.overlay_mode == OverlayMode.COMPACT
 
 
@@ -187,8 +193,8 @@ def test_main_applies_profile_defaults_before_validation(monkeypatch) -> None:
     monkeypatch.setattr(app, "load_trigger_config", lambda path: "trigger-config")
     monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
-    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
-    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: 0)
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: 0)
 
     assert app.main() == 0
     assert validated["config"].policy_name == "office"
@@ -246,8 +252,8 @@ def test_main_preserves_explicit_overrides_over_profile_defaults(monkeypatch) ->
     monkeypatch.setattr(app, "load_trigger_config", _capture_trigger)
     monkeypatch.setattr(app, "FrameRenderer", _capture_renderer)
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
-    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
-    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: 0)
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: 0)
 
     assert app.main() == 0
     assert captured["policy_name"] == "default"
@@ -285,8 +291,8 @@ def test_main_filters_loaded_zones_by_active_profile(monkeypatch) -> None:
     monkeypatch.setattr(app, "load_trigger_config", lambda path: None)
     monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
-    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
-    def _capture_run(_config, _policy, zones, _trigger_config, _source, _renderer, _logger):
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
+    def _capture_run(_config, _policy, zones, _trigger_config, _source, _renderer, _logger, **_kwargs):
         captured["zones"] = zones
         return 0
 
@@ -329,8 +335,8 @@ def test_main_passes_profile_presentation_into_renderer(monkeypatch) -> None:
     monkeypatch.setattr(app, "load_trigger_config", lambda path: None)
     monkeypatch.setattr(app, "FrameRenderer", _capture_renderer)
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
-    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
-    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: 0)
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: 0)
 
     assert app.main() == 0
     assert captured["overlay_mode"] == OverlayMode.DEBUG
