@@ -350,6 +350,7 @@ def test_log_run_started_includes_profile_metadata() -> None:
         profile_name="meeting_room",
         zones_path="config/zones.yaml",
         trigger_path="config/triggers.yaml",
+        integrations_path="config/integrations.yaml",
     )
     captured = {}
 
@@ -362,3 +363,4 @@ def test_log_run_started_includes_profile_metadata() -> None:
 
     assert captured["event"] == "run_started"
     assert captured["kwargs"]["profile"] == "meeting_room"
+    assert captured["kwargs"]["integrations_path"] == "config/integrations.yaml"
