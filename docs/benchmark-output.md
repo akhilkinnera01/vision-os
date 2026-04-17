@@ -2,6 +2,9 @@
 
 Vision OS can emit benchmark results to a JSON file with `--benchmark-output`.
 
+If you also need the semantic timeline and session-level rollups, see
+[`session-history.md`](session-history.md).
+
 ## Fields
 
 - `frames_processed`: number of inference steps completed
