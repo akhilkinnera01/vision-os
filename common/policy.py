@@ -65,7 +65,12 @@ class VisionPolicy:
 
 def load_policy(name: str = "default", path: str | None = None) -> VisionPolicy:
     """Load and validate a named or explicit YAML policy."""
-    policy_path = Path(path) if path else _policy_root() / f"{name}.yaml"
+    root = _policy_root().resolve()
+    policy_path = (Path(path) if path else root / f"{name}.yaml").resolve()
+
+    if not policy_path.is_relative_to(root):
+        raise PolicyValidationError(f"Policy file must be within: {root}")
+
     if not policy_path.is_file():
         raise PolicyValidationError(f"Policy file not found: {policy_path}")
 
