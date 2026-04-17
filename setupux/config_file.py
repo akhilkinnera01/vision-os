@@ -130,6 +130,10 @@ def write_starter_bundle(
     camera_index: int,
     profile_name: str | None,
     overlay_mode: OverlayMode,
+    input_path: str | None = None,
+    benchmark_output_path: str | None = None,
+    history_output_path: str | None = None,
+    session_summary_output_path: str | None = None,
 ) -> SetupBundle:
     """Write a starter config plus stub zone/trigger files for later editing."""
     bundle_dir = Path(output_dir)
@@ -146,8 +150,12 @@ def write_starter_bundle(
         VisionOSConfig(
             source_mode=source_mode,
             camera_index=camera_index,
+            input_path=input_path,
             profile_name=profile_name,
             overlay_mode=overlay_mode,
+            benchmark_output_path=benchmark_output_path,
+            history_output_path=history_output_path,
+            session_summary_output_path=session_summary_output_path,
         ),
         str(config_path),
     )

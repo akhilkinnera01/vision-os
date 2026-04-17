@@ -27,6 +27,7 @@ from setupux.config_file import SetupConfigError, load_runtime_config_file
 from setupux.models import ValidationCheck, ValidationReport, ValidationStatus
 from setupux.summary import format_validation_report
 from setupux.validate import discover_camera_indexes, validate_runtime_setup
+from setupux.wizard import run_setup_wizard
 from zones import ZoneConfigError, load_zones, select_zones_for_profile
 
 
@@ -35,6 +36,7 @@ def parse_args() -> VisionOSConfig:
     parser = argparse.ArgumentParser(description="Run Vision OS on a webcam, video, or replay feed.")
     argv = sys.argv[1:]
     parser.add_argument("--config", help="Optional path to a saved Vision OS runtime config YAML file.")
+    parser.add_argument("--setup", action="store_true", help="Run the guided starter config flow and exit.")
     parser.add_argument("--list-cameras", action="store_true", help="Probe a small camera index range and exit.")
     parser.add_argument("--validate-config", action="store_true", help="Run setup validation and exit.")
     parser.add_argument("--demo", action="store_true", help="Run the bundled demo preset.")
@@ -84,6 +86,8 @@ def parse_args() -> VisionOSConfig:
 
     if args.config and args.demo:
         parser.error("--config and --demo cannot be used together.")
+    if args.setup and (args.config or args.demo):
+        parser.error("--setup cannot be combined with --config or --demo.")
 
     if args.config:
         config_from_file = load_runtime_config_file(args.config)
@@ -100,6 +104,7 @@ def parse_args() -> VisionOSConfig:
 
     return VisionOSConfig(
         config_path=args.config if args.config else config_from_file.config_path,
+        setup_mode=args.setup,
         list_cameras=args.list_cameras,
         validate_config=args.validate_config,
         demo_mode=args.demo or config_from_file.demo_mode,
@@ -493,6 +498,9 @@ def main() -> int:
     """Run the end-to-end source loop until the user quits or the source is exhausted."""
     try:
         config = parse_args()
+        if config.setup_mode:
+            run_setup_wizard()
+            return 0
         if config.list_cameras:
             cameras = discover_camera_indexes()
             if cameras:
