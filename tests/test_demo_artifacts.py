@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import cv2
+import yaml
 
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "demo"
@@ -43,3 +44,12 @@ def test_demo_overlay_image_is_present_and_loadable() -> None:
     assert image is not None
     assert image.shape[0] > 0
     assert image.shape[1] > 0
+
+
+def test_demo_zone_config_exists_and_has_zones() -> None:
+    zone_path = DEMO_DIR / "sample-zones.yaml"
+    payload = yaml.safe_load(zone_path.read_text(encoding="utf-8"))
+
+    assert zone_path.is_file()
+    assert isinstance(payload, dict)
+    assert len(payload["zones"]) >= 2
