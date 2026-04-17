@@ -11,6 +11,7 @@ from common.models import (
     Decision,
     Detection,
     Explanation,
+    HistoryRecord,
     RuntimeMetrics,
     VisionEvent,
 )
@@ -51,6 +52,7 @@ class InferenceOutput:
     runtime_metrics: RuntimeMetrics
     events: list[VisionEvent]
     actor_frame_state: ActorFrameState
+    history_record: HistoryRecord
     zone_states: tuple[ZoneRuntimeState, ...] = ()
     trigger_records: tuple[TriggeredActionRecord, ...] = ()
 
@@ -221,6 +223,27 @@ class VisionPipeline:
             stage_timings=timer.snapshot(),
             scene_stability_score=temporal_state.metrics.stability_score,
         )
+        history_record = HistoryRecord(
+            frame_index=packet.frame_index,
+            timestamp=packet.timestamp,
+            scene_label=decision.label.value,
+            confidence=decision.confidence,
+            action=decision.action,
+            risk_flags=tuple(decision.risk_flags),
+            focus_score=decision.scene_metrics.focus_score,
+            distraction_score=decision.scene_metrics.distraction_score,
+            collaboration_score=decision.scene_metrics.collaboration_score,
+            stability_score=decision.scene_metrics.stability_score,
+            focus_duration_seconds=decision.scene_metrics.focus_duration_seconds,
+            decision_switch_rate=decision.scene_metrics.decision_switch_rate,
+            average_inference_ms=runtime_metrics.average_inference_ms,
+            fps=runtime_metrics.fps,
+            dropped_frames=runtime_metrics.dropped_frames,
+            event_types=tuple(event.event_type for event in events),
+            trigger_ids=tuple(record.trigger_id for record in trigger_records),
+            zone_labels={zone_state.zone_id: zone_state.context.label.value for zone_state in zone_states},
+            stage_timings=runtime_metrics.stage_timings,
+        )
         return InferenceOutput(
             frame_index=packet.frame_index,
             detections=detections,
@@ -229,6 +252,7 @@ class VisionPipeline:
             runtime_metrics=runtime_metrics,
             events=events,
             actor_frame_state=actor_frame_state,
+            history_record=history_record,
             zone_states=zone_states,
             trigger_records=trigger_records,
         )
