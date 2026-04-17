@@ -19,6 +19,8 @@ class VisionOSConfig:
     max_detections: int = 25
     source_mode: SourceMode = SourceMode.WEBCAM
     input_path: str | None = None
+    profile_name: str | None = None
+    profile_path: str | None = None
     zones_path: str | None = None
     trigger_path: str | None = None
     record_path: str | None = None
@@ -30,3 +32,7 @@ class VisionOSConfig:
     max_frames: int | None = None
     headless: bool = False
     log_json: bool = False
+    policy_explicit: bool = False
+    zones_explicit: bool = False
+    trigger_explicit: bool = False
+    overlay_mode_explicit: bool = False

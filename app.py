@@ -26,9 +26,12 @@ from zones import ZoneConfigError, load_zones
 def parse_args() -> VisionOSConfig:
     """Parse CLI arguments into a runtime config object."""
     parser = argparse.ArgumentParser(description="Run Vision OS on a webcam, video, or replay feed.")
+    argv = sys.argv[1:]
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
+    parser.add_argument("--profile", help="Optional built-in runtime profile name.")
+    parser.add_argument("--profile-file", help="Optional path to a custom runtime profile YAML file.")
     parser.add_argument("--zones-file", help="Optional path to a YAML file that defines static polygon zones.")
     parser.add_argument("--trigger-file", help="Optional path to a YAML file that defines event trigger outputs.")
     parser.add_argument("--model", default="yolov8n.pt", help="YOLO weights path or name.")
@@ -79,6 +82,8 @@ def parse_args() -> VisionOSConfig:
         max_detections=args.max_detections,
         source_mode=source_mode,
         input_path=args.input,
+        profile_name=args.profile,
+        profile_path=args.profile_file,
         zones_path=args.zones_file,
         trigger_path=args.trigger_file,
         record_path=args.record,
@@ -90,6 +95,10 @@ def parse_args() -> VisionOSConfig:
         max_frames=args.max_frames,
         headless=args.headless,
         log_json=args.log_json,
+        policy_explicit=("--policy" in argv) or ("--policy-file" in argv),
+        zones_explicit="--zones-file" in argv,
+        trigger_explicit="--trigger-file" in argv,
+        overlay_mode_explicit="--overlay-mode" in argv,
     )
 
 
