@@ -8,6 +8,7 @@ from server.models import (
     WorkspaceManifest,
     WorkspaceSummary,
 )
+from server.store import WorkspaceStore
 
 __all__ = [
     "ArtifactIndex",
@@ -16,4 +17,5 @@ __all__ = [
     "SessionSnapshot",
     "WorkspaceManifest",
     "WorkspaceSummary",
+    "WorkspaceStore",
 ]

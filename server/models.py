@@ -22,6 +22,17 @@ class ArtifactIndex:
             "session_summary_path": self.session_summary_path,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, object] | None) -> ArtifactIndex:
+        if payload is None:
+            return cls()
+        return cls(
+            replay_path=payload.get("replay_path"),
+            history_path=payload.get("history_path"),
+            benchmark_path=payload.get("benchmark_path"),
+            session_summary_path=payload.get("session_summary_path"),
+        )
+
 
 @dataclass(slots=True, frozen=True)
 class WorkspaceManifest:
@@ -51,6 +62,21 @@ class WorkspaceManifest:
             "integrations_path": self.integrations_path,
             "outputs": self.outputs.to_dict(),
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> WorkspaceManifest:
+        return cls(
+            workspace_id=str(payload["workspace_id"]),
+            name=str(payload["name"]),
+            source_mode=str(payload["source_mode"]),
+            profile_id=_optional_str(payload.get("profile_id")),
+            policy_name=_optional_str(payload.get("policy_name")),
+            source_ref=_optional_str(payload.get("source_ref")),
+            zones_path=_optional_str(payload.get("zones_path")),
+            triggers_path=_optional_str(payload.get("triggers_path")),
+            integrations_path=_optional_str(payload.get("integrations_path")),
+            outputs=ArtifactIndex.from_dict(_optional_dict(payload.get("outputs"))),
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -141,3 +167,11 @@ class SessionEvent:
             "timestamp": self.timestamp,
             "payload": self.payload,
         }
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _optional_dict(value: object) -> dict[str, object] | None:
+    return value if isinstance(value, dict) else None
