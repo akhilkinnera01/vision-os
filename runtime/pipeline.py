@@ -209,6 +209,7 @@ class VisionPipeline:
                 temporal_state,
                 self.benchmark_tracker.snapshot(),
                 events=events,
+                trigger_records=trigger_records,
                 zone_states=zone_states,
             )
 
