@@ -1,6 +1,7 @@
 .DS_Store
 .pytest_cache/
 .venv/
+.omx/
 __pycache__/
 *.pyc
 *.pyo
@@ -15,6 +16,7 @@ yolov8n.pt
 *.mp4
 benchmarks/
 recordings/
+docs/superpowers/
 demo/*.json
 demo/*.jsonl
 !demo/sample.mp4
