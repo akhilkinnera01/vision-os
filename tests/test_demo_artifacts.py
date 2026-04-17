@@ -9,7 +9,7 @@ import cv2
 import yaml
 
 from common.profile import load_profile
-from integrations import load_trigger_config
+from integrations import load_integration_config, load_trigger_config
 from setupux import load_runtime_config_file
 from zones import load_zones, select_zones_for_profile
 
@@ -100,6 +100,18 @@ def test_demo_trigger_config_exists_and_has_rules() -> None:
     assert any(rule.condition and rule.condition.source == "decision.label" for rule in config.rules)
 
 
+def test_demo_integration_config_exists_and_has_targets() -> None:
+    integration_path = DEMO_DIR / "sample-integrations.yaml"
+    payload = yaml.safe_load(integration_path.read_text(encoding="utf-8"))
+    config = load_integration_config(str(integration_path))
+
+    assert integration_path.is_file()
+    assert isinstance(payload, dict)
+    assert len(payload["integrations"]) >= 2
+    assert len(config.targets) >= 2
+    assert any(target.source == "session_summary" for target in config.targets)
+
+
 def test_demo_profile_manifest_exists_and_resolves_assets() -> None:
     profile_path = DEMO_DIR / "sample-profile.yaml"
     profile = load_profile(path=str(profile_path))
@@ -110,6 +122,7 @@ def test_demo_profile_manifest_exists_and_resolves_assets() -> None:
     assert profile.profile_id == "sample_demo"
     assert profile.zones_path == str(DEMO_DIR / "sample-zones.yaml")
     assert profile.trigger_path == str(DEMO_DIR / "sample-triggers.yaml")
+    assert profile.integrations_path == str(DEMO_DIR / "sample-integrations.yaml")
     assert len(scoped_zones) >= 1
 
 

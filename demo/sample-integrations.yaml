@@ -1,0 +1,12 @@
+integrations:
+  - id: demo-focus-trigger-log
+    type: log
+    source: trigger
+    trigger_ids:
+      - sustained-focus-log
+    event: integration_dispatch
+
+  - id: demo-session-summary-log
+    type: log
+    source: session_summary
+    event: session_summary_dispatch
