@@ -309,6 +309,144 @@ class VisionEvent:
 
 
 @dataclass(slots=True, frozen=True)
+class HistoryRecord:
+    """Structured per-frame session history derived from stable runtime output."""
+
+    frame_index: int
+    timestamp: float
+    scene_label: str
+    confidence: float
+    action: str
+    risk_flags: tuple[str, ...] = field(default_factory=tuple)
+    focus_score: float = 0.0
+    distraction_score: float = 0.0
+    collaboration_score: float = 0.0
+    stability_score: float = 0.0
+    focus_duration_seconds: float = 0.0
+    decision_switch_rate: float = 0.0
+    average_inference_ms: float = 0.0
+    fps: float = 0.0
+    dropped_frames: int = 0
+    event_types: tuple[str, ...] = field(default_factory=tuple)
+    trigger_ids: tuple[str, ...] = field(default_factory=tuple)
+    zone_labels: dict[str, str] = field(default_factory=dict)
+    stage_timings: dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "frame_index": self.frame_index,
+            "timestamp": self.timestamp,
+            "scene_label": self.scene_label,
+            "confidence": self.confidence,
+            "action": self.action,
+            "risk_flags": list(self.risk_flags),
+            "focus_score": self.focus_score,
+            "distraction_score": self.distraction_score,
+            "collaboration_score": self.collaboration_score,
+            "stability_score": self.stability_score,
+            "focus_duration_seconds": self.focus_duration_seconds,
+            "decision_switch_rate": self.decision_switch_rate,
+            "average_inference_ms": self.average_inference_ms,
+            "fps": self.fps,
+            "dropped_frames": self.dropped_frames,
+            "event_types": list(self.event_types),
+            "trigger_ids": list(self.trigger_ids),
+            "zone_labels": self.zone_labels,
+            "stage_timings": self.stage_timings,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> HistoryRecord:
+        return cls(
+            frame_index=int(payload["frame_index"]),
+            timestamp=float(payload["timestamp"]),
+            scene_label=str(payload["scene_label"]),
+            confidence=float(payload["confidence"]),
+            action=str(payload["action"]),
+            risk_flags=tuple(str(item) for item in payload.get("risk_flags", [])),
+            focus_score=float(payload.get("focus_score", 0.0)),
+            distraction_score=float(payload.get("distraction_score", 0.0)),
+            collaboration_score=float(payload.get("collaboration_score", 0.0)),
+            stability_score=float(payload.get("stability_score", 0.0)),
+            focus_duration_seconds=float(payload.get("focus_duration_seconds", 0.0)),
+            decision_switch_rate=float(payload.get("decision_switch_rate", 0.0)),
+            average_inference_ms=float(payload.get("average_inference_ms", 0.0)),
+            fps=float(payload.get("fps", 0.0)),
+            dropped_frames=int(payload.get("dropped_frames", 0)),
+            event_types=tuple(str(item) for item in payload.get("event_types", [])),
+            trigger_ids=tuple(str(item) for item in payload.get("trigger_ids", [])),
+            zone_labels={str(key): str(value) for key, value in dict(payload.get("zone_labels", {})).items()},
+            stage_timings={str(key): float(value) for key, value in dict(payload.get("stage_timings", {})).items()},
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class SessionAnalyticsSummary:
+    """Whole-session analytics artifact derived from structured history."""
+
+    started_at: float | None = None
+    ended_at: float | None = None
+    duration_seconds: float = 0.0
+    frames_processed: int = 0
+    fps: float = 0.0
+    average_inference_ms: float = 0.0
+    dropped_frames: int = 0
+    dominant_scene_label: str | None = None
+    decision_switch_count: int = 0
+    decision_switch_rate: float = 0.0
+    average_stability_score: float = 0.0
+    focus_duration_seconds: float = 0.0
+    group_activity_duration_seconds: float = 0.0
+    casual_use_duration_seconds: float = 0.0
+    event_counts: dict[str, int] = field(default_factory=dict)
+    label_durations: dict[str, float] = field(default_factory=dict)
+    stage_timings: dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "duration_seconds": self.duration_seconds,
+            "frames_processed": self.frames_processed,
+            "fps": self.fps,
+            "average_inference_ms": self.average_inference_ms,
+            "dropped_frames": self.dropped_frames,
+            "dominant_scene_label": self.dominant_scene_label,
+            "decision_switch_count": self.decision_switch_count,
+            "decision_switch_rate": self.decision_switch_rate,
+            "average_stability_score": self.average_stability_score,
+            "focus_duration_seconds": self.focus_duration_seconds,
+            "group_activity_duration_seconds": self.group_activity_duration_seconds,
+            "casual_use_duration_seconds": self.casual_use_duration_seconds,
+            "event_counts": self.event_counts,
+            "label_durations": self.label_durations,
+            "stage_timings": self.stage_timings,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> SessionAnalyticsSummary:
+        return cls(
+            started_at=None if payload.get("started_at") is None else float(payload["started_at"]),
+            ended_at=None if payload.get("ended_at") is None else float(payload["ended_at"]),
+            duration_seconds=float(payload.get("duration_seconds", 0.0)),
+            frames_processed=int(payload.get("frames_processed", 0)),
+            fps=float(payload.get("fps", 0.0)),
+            average_inference_ms=float(payload.get("average_inference_ms", 0.0)),
+            dropped_frames=int(payload.get("dropped_frames", 0)),
+            dominant_scene_label=None if payload.get("dominant_scene_label") is None else str(payload["dominant_scene_label"]),
+            decision_switch_count=int(payload.get("decision_switch_count", 0)),
+            decision_switch_rate=float(payload.get("decision_switch_rate", 0.0)),
+            average_stability_score=float(payload.get("average_stability_score", 0.0)),
+            focus_duration_seconds=float(payload.get("focus_duration_seconds", 0.0)),
+            group_activity_duration_seconds=float(payload.get("group_activity_duration_seconds", 0.0)),
+            casual_use_duration_seconds=float(payload.get("casual_use_duration_seconds", 0.0)),
+            event_counts={str(key): int(value) for key, value in dict(payload.get("event_counts", {})).items()},
+            label_durations={str(key): float(value) for key, value in dict(payload.get("label_durations", {})).items()},
+            stage_timings={str(key): float(value) for key, value in dict(payload.get("stage_timings", {})).items()},
+        )
+
+
+@dataclass(slots=True, frozen=True)
 class ReplayRecord:
     """Machine-readable replay artifact for deterministic debugging."""
 
