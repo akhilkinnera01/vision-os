@@ -29,7 +29,7 @@ def test_main_prints_startup_summary_before_running(monkeypatch, capsys) -> None
     monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
     monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
-    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: 0)
 
     assert app.main() == 0
 
