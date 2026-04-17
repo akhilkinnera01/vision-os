@@ -31,7 +31,11 @@ class ProfilePresentation:
     """Profile-controlled presentation hints for the overlay layer."""
 
     overlay_mode: OverlayMode = OverlayMode.COMPACT
-    compact_sections: tuple[OverlaySection, ...] = (OverlaySection.SCORES,)
+    compact_sections: tuple[OverlaySection, ...] = (
+        OverlaySection.SCORES,
+        OverlaySection.ZONES,
+        OverlaySection.RUNTIME,
+    )
     debug_sections: tuple[OverlaySection, ...] = (
         OverlaySection.SCORES,
         OverlaySection.EVENTS,

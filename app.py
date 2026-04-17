@@ -413,7 +413,10 @@ def main() -> int:
         )
         trigger_config = load_trigger_config(config.trigger_path) if config.trigger_path else None
         logger = VisionLogger(config.log_json)
-        renderer = FrameRenderer(config.overlay_mode)
+        renderer = FrameRenderer(
+            config.overlay_mode,
+            presentation=None if profile is None else profile.presentation,
+        )
         source = _build_source(config)
     except (FileNotFoundError, PolicyValidationError, ProfileValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

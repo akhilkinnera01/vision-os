@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from common.profile import OverlaySection, ProfilePresentation
 from common.models import (
     BoundingBox,
     ContextLabel,
     Decision,
     Explanation,
+    OverlayMode,
     RuntimeMetrics,
     SceneMetrics,
 )
@@ -156,3 +158,49 @@ def test_renderer_accepts_zone_states_for_overlay() -> None:
     )
 
     assert annotated.shape == frame.shape
+
+
+def test_renderer_respects_profile_compact_sections() -> None:
+    renderer = FrameRenderer(
+        presentation=ProfilePresentation(
+            compact_sections=(OverlaySection.ZONES, OverlaySection.RUNTIME),
+            debug_sections=(OverlaySection.SCORES, OverlaySection.ZONES, OverlaySection.RUNTIME),
+        )
+    )
+    layout = renderer._build_header_layout(
+        frame_width=1280,
+        frame_height=720,
+        decision=make_decision(),
+        explanation=make_explanation(),
+        runtime_metrics=RuntimeMetrics(frames_processed=42, fps=11.3, average_inference_ms=28.4, dropped_frames=1),
+    )
+
+    texts = [row.text for row in layout.rows]
+    assert any(text.startswith("Zones:") for text in texts)
+    assert any(text.startswith("Runtime:") for text in texts)
+    assert not any(text.startswith("Scores:") for text in texts)
+
+
+def test_renderer_respects_profile_debug_sections() -> None:
+    renderer = FrameRenderer(
+        overlay_mode=OverlayMode.DEBUG,
+        presentation=ProfilePresentation(
+            compact_sections=(OverlaySection.SCORES,),
+            debug_sections=(OverlaySection.ZONES,),
+        ),
+    )
+    layout = renderer._build_header_layout(
+        frame_width=1280,
+        frame_height=720,
+        decision=make_decision(),
+        explanation=make_explanation(),
+        runtime_metrics=RuntimeMetrics(frames_processed=42, fps=11.3, average_inference_ms=28.4, dropped_frames=1),
+    )
+
+    texts = [row.text for row in layout.rows]
+    assert any(text.startswith("Zones:") for text in texts)
+    assert not any(text.startswith("Scores:") for text in texts)
+    assert not any(text.startswith("Events:") for text in texts)
+    assert not any(text.startswith("Triggers:") for text in texts)
+    assert not any(text.startswith("Runtime:") for text in texts)
+    assert not any(text.startswith("Spatial:") for text in texts)

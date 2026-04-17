@@ -185,7 +185,7 @@ def test_main_applies_profile_defaults_before_validation(monkeypatch) -> None:
     monkeypatch.setattr(app, "load_policy", lambda name, path=None: SimpleNamespace(name=name))
     monkeypatch.setattr(app, "load_zones", lambda path: ())
     monkeypatch.setattr(app, "load_trigger_config", lambda path: "trigger-config")
-    monkeypatch.setattr(app, "FrameRenderer", lambda mode: SimpleNamespace(mode=mode))
+    monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
     monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
     monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: 0)
@@ -234,9 +234,9 @@ def test_main_preserves_explicit_overrides_over_profile_defaults(monkeypatch) ->
         captured["trigger_path"] = path
         return "trigger-config"
 
-    def _capture_renderer(mode):
+    def _capture_renderer(mode, presentation=None):
         captured["overlay_mode"] = mode
-        return SimpleNamespace(mode=mode)
+        return SimpleNamespace(mode=mode, presentation=presentation)
 
     monkeypatch.setattr(app, "parse_args", lambda: config)
     monkeypatch.setattr(app, "load_profile", lambda name=None, path=None: profile)
@@ -283,7 +283,7 @@ def test_main_filters_loaded_zones_by_active_profile(monkeypatch) -> None:
     monkeypatch.setattr(app, "load_policy", lambda name, path=None: SimpleNamespace(name=name))
     monkeypatch.setattr(app, "load_zones", lambda path: raw_zones)
     monkeypatch.setattr(app, "load_trigger_config", lambda path: None)
-    monkeypatch.setattr(app, "FrameRenderer", lambda mode: SimpleNamespace(mode=mode))
+    monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
     monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
     def _capture_run(_config, _policy, zones, _trigger_config, _source, _renderer, _logger):
@@ -298,6 +298,43 @@ def test_main_filters_loaded_zones_by_active_profile(monkeypatch) -> None:
 
     assert app.main() == 0
     assert [zone.zone_id for zone in captured["zones"]] == ["shared", "study_desk"]
+
+
+def test_main_passes_profile_presentation_into_renderer(monkeypatch) -> None:
+    config = VisionOSConfig(
+        source_mode=SourceMode.VIDEO,
+        input_path="demo/sample.mp4",
+        profile_name="meeting_room",
+    )
+    presentation = ProfilePresentation(overlay_mode=OverlayMode.DEBUG)
+    profile = RuntimeProfile(
+        profile_id="meeting_room",
+        name="Meeting Room",
+        description="Collaboration-first defaults",
+        policy_name="office",
+        presentation=presentation,
+    )
+    captured = {}
+
+    def _capture_renderer(mode, presentation=None):
+        captured["overlay_mode"] = mode
+        captured["presentation"] = presentation
+        return SimpleNamespace(mode=mode, presentation=presentation)
+
+    monkeypatch.setattr(app, "parse_args", lambda: config)
+    monkeypatch.setattr(app, "load_profile", lambda name=None, path=None: profile)
+    monkeypatch.setattr(app, "_validate_input_path", lambda resolved: None)
+    monkeypatch.setattr(app, "load_policy", lambda name, path=None: SimpleNamespace(name=name))
+    monkeypatch.setattr(app, "load_zones", lambda path: ())
+    monkeypatch.setattr(app, "load_trigger_config", lambda path: None)
+    monkeypatch.setattr(app, "FrameRenderer", _capture_renderer)
+    monkeypatch.setattr(app, "_build_source", lambda _config: object())
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: 0)
+
+    assert app.main() == 0
+    assert captured["overlay_mode"] == OverlayMode.DEBUG
+    assert captured["presentation"] == presentation
 
 
 def test_log_run_started_includes_profile_metadata() -> None:
