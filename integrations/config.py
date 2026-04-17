@@ -1,4 +1,4 @@
-"""Load trigger rules and integration outputs from YAML."""
+"""Load trigger rules and generic integration targets from YAML."""
 
 from __future__ import annotations
 
@@ -9,17 +9,44 @@ from urllib.parse import urlparse
 import yaml
 
 from common.models import SceneMetrics
-from integrations.models import TriggerAction, TriggerCondition, TriggerConfig, TriggerRule
+from integrations.models import IntegrationConfig, IntegrationTarget, TriggerAction, TriggerCondition, TriggerConfig, TriggerRule
 
 
 class IntegrationConfigError(ValueError):
     """Raised when a trigger/integration config is malformed."""
 
 
+SUPPORTED_INTEGRATION_SOURCES = frozenset({"event", "session_summary", "status", "trigger"})
+SUPPORTED_INTEGRATION_TARGET_TYPES = frozenset({"file_append", "log", "mqtt_publish", "stdout", "webhook"})
 SUPPORTED_TRIGGER_OPERATORS = frozenset({"equals", "not_equals", "gte", "gt", "lte", "lt"})
 SUPPORTED_TRIGGER_DECISION_SOURCES = frozenset({"decision.label", "decision.confidence"})
 SUPPORTED_TEMPORAL_METRICS = frozenset(field.name for field in fields(SceneMetrics))
 SUPPORTED_WEBHOOK_METHODS = frozenset({"DELETE", "PATCH", "POST", "PUT"})
+
+
+def load_integration_config(path: str) -> IntegrationConfig:
+    """Load and validate the generic integrations YAML file."""
+    config_path = Path(path)
+    if not config_path.is_file():
+        raise IntegrationConfigError(f"Integration config not found: {config_path}")
+
+    payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(payload, dict):
+        raise IntegrationConfigError(f"Integration config root must be a mapping: {config_path}")
+
+    raw_targets = payload.get("integrations", [])
+    if not isinstance(raw_targets, list):
+        raise IntegrationConfigError("Integration config field 'integrations' must be a list.")
+
+    targets: list[IntegrationTarget] = []
+    seen_ids: set[str] = set()
+    for index, raw_target in enumerate(raw_targets):
+        target = _parse_integration_target(raw_target, index)
+        if target.integration_id in seen_ids:
+            raise IntegrationConfigError(f"Duplicate integration id: {target.integration_id}")
+        seen_ids.add(target.integration_id)
+        targets.append(target)
+    return IntegrationConfig(targets=tuple(targets))
 
 
 def load_trigger_config(path: str) -> TriggerConfig:
@@ -232,6 +259,67 @@ def _parse_actions(payload: object, rule_id: str) -> tuple[TriggerAction, ...]:
     return tuple(actions)
 
 
+def _parse_integration_target(payload: object, index: int) -> IntegrationTarget:
+    if not isinstance(payload, dict):
+        raise IntegrationConfigError(f"Integration target at index {index} must be a mapping.")
+
+    integration_id = _require_config_string(payload, "id", f"Integration target at index {index}")
+    source = _require_config_string(payload, "source", f"Integration '{integration_id}'")
+    if source not in SUPPORTED_INTEGRATION_SOURCES:
+        raise IntegrationConfigError(
+            f"Integration '{integration_id}' uses unsupported source '{source}'."
+        )
+
+    target_type = _require_config_string(payload, "type", f"Integration '{integration_id}'")
+    if target_type not in SUPPORTED_INTEGRATION_TARGET_TYPES:
+        raise IntegrationConfigError(
+            f"Integration '{integration_id}' target type '{target_type}' is not supported."
+        )
+
+    enabled = _optional_bool(payload, "enabled", integration_id, default=True)
+    target, method, mqtt_host, mqtt_port, mqtt_topic = _parse_integration_transport(
+        integration_id,
+        target_type,
+        payload,
+    )
+    trigger_ids = _optional_string_list(payload, "trigger_ids", integration_id)
+    event_types = _optional_string_list(payload, "event_types", integration_id)
+    interval_seconds = _optional_numeric_field(payload, "interval_seconds", integration_id)
+    if source == "status":
+        if interval_seconds is None or interval_seconds <= 0:
+            raise IntegrationConfigError(
+                f"Integration '{integration_id}' field 'interval_seconds' must be > 0 for status targets."
+            )
+    elif interval_seconds is not None and interval_seconds <= 0:
+        raise IntegrationConfigError(
+            f"Integration '{integration_id}' field 'interval_seconds' must be > 0 when present."
+        )
+
+    if source == "event" and not event_types:
+        raise IntegrationConfigError(
+            f"Integration '{integration_id}' event source targets must define at least one event type."
+        )
+    if source == "trigger" and not trigger_ids:
+        raise IntegrationConfigError(
+            f"Integration '{integration_id}' trigger source targets must define at least one trigger id."
+        )
+
+    return IntegrationTarget(
+        integration_id=integration_id,
+        target_type=target_type,
+        source=source,
+        enabled=enabled,
+        target=target,
+        method=method,
+        mqtt_host=mqtt_host,
+        mqtt_port=mqtt_port,
+        mqtt_topic=mqtt_topic,
+        event_types=tuple(event_types),
+        trigger_ids=tuple(trigger_ids),
+        interval_seconds=interval_seconds,
+    )
+
+
 def _validate_condition_source(rule_id: str, source: str) -> None:
     if source in SUPPORTED_TRIGGER_DECISION_SOURCES or source == "event.event_type":
         return
@@ -255,4 +343,66 @@ def _validate_webhook_url(rule_id: str, url: str) -> None:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise IntegrationConfigError(
             f"Trigger '{rule_id}' action 'webhook' must use an absolute http(s) URL."
+        )
+
+
+def _parse_integration_transport(
+    integration_id: str,
+    target_type: str,
+    payload: dict[str, object],
+) -> tuple[str | None, str, str | None, int, str | None]:
+    if target_type == "stdout":
+        return (None, "POST", None, 1883, None)
+    if target_type == "file_append":
+        target = _require_config_string(payload, "path", f"Integration '{integration_id}'")
+        return (target, "POST", None, 1883, None)
+    if target_type == "log":
+        event_name = _optional_string(payload, "event", integration_id)
+        return (event_name or "integration_dispatch", "POST", None, 1883, None)
+    if target_type == "webhook":
+        target = _require_config_string(payload, "url", f"Integration '{integration_id}'")
+        _validate_named_webhook_url(integration_id, target)
+        method = payload.get("method", "POST")
+        if not isinstance(method, str) or not method.strip():
+            raise IntegrationConfigError(f"Integration '{integration_id}' requires a valid 'method'.")
+        normalized_method = method.strip().upper()
+        if normalized_method not in SUPPORTED_WEBHOOK_METHODS:
+            raise IntegrationConfigError(
+                f"Integration '{integration_id}' uses unsupported method '{normalized_method}'."
+            )
+        return (target, normalized_method, None, 1883, None)
+    host = _require_config_string(payload, "host", f"Integration '{integration_id}'")
+    topic = _require_config_string(payload, "topic", f"Integration '{integration_id}'")
+    port = int(payload.get("port", 1883))
+    if port <= 0:
+        raise IntegrationConfigError(f"Integration '{integration_id}' field 'port' must be > 0.")
+    return (topic, "POST", host, port, topic)
+
+
+def _require_config_string(payload: dict[str, object], key: str, owner: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise IntegrationConfigError(f"{owner} must define a non-empty '{key}' field.")
+    return value.strip()
+
+
+def _optional_string_list(payload: dict[str, object], key: str, owner: str) -> tuple[str, ...]:
+    if key not in payload:
+        return ()
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise IntegrationConfigError(f"Integration '{owner}' field '{key}' must be a list of strings.")
+    parsed: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise IntegrationConfigError(f"Integration '{owner}' field '{key}' must contain non-empty strings.")
+        parsed.append(item.strip())
+    return tuple(parsed)
+
+
+def _validate_named_webhook_url(integration_id: str, url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise IntegrationConfigError(
+            f"Integration '{integration_id}' must use an absolute http(s) URL."
         )

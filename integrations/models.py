@@ -1,4 +1,4 @@
-"""Typed trigger and integration models."""
+"""Typed trigger and generic integration models."""
 
 from __future__ import annotations
 
@@ -6,6 +6,31 @@ from dataclasses import dataclass, field
 
 from common.models import Decision, TemporalState, VisionEvent
 from zones.models import ZoneRuntimeState
+
+
+@dataclass(slots=True, frozen=True)
+class IntegrationTarget:
+    """One configured delivery target for a runtime integration source."""
+
+    integration_id: str
+    target_type: str
+    source: str
+    enabled: bool = True
+    target: str | None = None
+    method: str = "POST"
+    mqtt_host: str | None = None
+    mqtt_port: int = 1883
+    mqtt_topic: str | None = None
+    event_types: tuple[str, ...] = ()
+    trigger_ids: tuple[str, ...] = ()
+    interval_seconds: float | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class IntegrationConfig:
+    """Loaded generic integration targets for the runtime."""
+
+    targets: tuple[IntegrationTarget, ...]
 
 
 @dataclass(slots=True, frozen=True)
