@@ -119,3 +119,45 @@ def test_finalize_run_dispatches_session_summary_integrations() -> None:
     assert result == 0
     assert len(publisher_calls) == 1
     assert publisher_calls[0].dominant_scene_label == "Focused Work"
+
+
+def test_main_reports_only_enabled_integration_targets_in_startup_summary(monkeypatch) -> None:
+    config = VisionOSConfig(
+        source_mode=SourceMode.VIDEO,
+        input_path="demo/sample.mp4",
+        integrations_path="config/integrations.yaml",
+        headless=True,
+    )
+    captured = {}
+
+    monkeypatch.setattr(app, "parse_args", lambda: config)
+    monkeypatch.setattr(app, "_validate_input_path", lambda _config: None)
+    monkeypatch.setattr(app, "load_policy", lambda name, path=None: load_policy(name, path))
+    monkeypatch.setattr(app, "load_zones", lambda path: ())
+    monkeypatch.setattr(app, "load_trigger_config", lambda path: None)
+    monkeypatch.setattr(
+        app,
+        "load_integration_config",
+        lambda path: SimpleNamespace(
+            targets=(
+                SimpleNamespace(enabled=True),
+                SimpleNamespace(enabled=False),
+                SimpleNamespace(enabled=True),
+            )
+        ),
+    )
+    monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
+    monkeypatch.setattr(app, "_build_source", lambda _config: object())
+    monkeypatch.setattr(
+        app,
+        "format_startup_summary",
+        lambda config, *, policy_name, zone_count, trigger_count, integration_count, profile_id: captured.update(
+            {"integration_count": integration_count}
+        )
+        or "startup",
+    )
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: 0)
+
+    assert app.main() == 0
+    assert captured["integration_count"] == 2

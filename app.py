@@ -619,7 +619,11 @@ def main() -> int:
         return 1
 
     trigger_count = 0 if trigger_config is None else len(getattr(trigger_config, "rules", ()))
-    integration_count = 0 if integration_config is None else len(getattr(integration_config, "targets", ()))
+    integration_count = (
+        0
+        if integration_config is None
+        else sum(1 for target in getattr(integration_config, "targets", ()) if getattr(target, "enabled", True))
+    )
     print(
         format_startup_summary(
             config,
