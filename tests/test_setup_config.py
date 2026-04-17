@@ -6,8 +6,9 @@ from pathlib import Path
 import sys
 
 import app
+from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
-from setupux.config_file import load_runtime_config_file
+from setupux.config_file import load_runtime_config_file, write_runtime_config_file
 
 
 def test_load_runtime_config_file_resolves_relative_paths(tmp_path: Path) -> None:
@@ -49,6 +50,26 @@ session_summary_output: out/session-summary.json
     assert config.benchmark_output_path == str(tmp_path / "out" / "benchmark.json")
     assert config.history_output_path == str(tmp_path / "out" / "history.jsonl")
     assert config.session_summary_output_path == str(tmp_path / "out" / "session-summary.json")
+
+
+def test_write_runtime_config_file_persists_integrations_path_relatively(tmp_path: Path) -> None:
+    integrations_path = tmp_path / "visionos.integrations.yaml"
+    integrations_path.write_text("integrations: []\n", encoding="utf-8")
+    config_path = tmp_path / "visionos.config.yaml"
+
+    write_runtime_config_file(
+        VisionOSConfig(
+            source_mode=SourceMode.REPLAY,
+            input_path=str(tmp_path / "session.jsonl"),
+            integrations_path=str(integrations_path),
+            overlay_mode=OverlayMode.DEBUG,
+        ),
+        str(config_path),
+    )
+
+    payload = config_path.read_text(encoding="utf-8")
+
+    assert "integrations_file: visionos.integrations.yaml" in payload
 
 
 def test_parse_args_accepts_config_file(monkeypatch, tmp_path: Path) -> None:
