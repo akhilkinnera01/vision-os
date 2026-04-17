@@ -13,7 +13,7 @@ import cv2
 
 from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
-from common.profile import RuntimeProfile
+from common.profile import ProfileValidationError, RuntimeProfile, load_profile
 from common.policy import PolicyValidationError, load_policy
 from integrations import IntegrationConfigError, load_trigger_config
 from runtime.benchmark import BenchmarkTracker
@@ -140,6 +140,13 @@ def _apply_profile_defaults(config: VisionOSConfig, profile: RuntimeProfile) -> 
     if not resolved.overlay_mode_explicit:
         resolved = replace(resolved, overlay_mode=profile.presentation.overlay_mode)
     return resolved
+
+
+def _load_selected_profile(config: VisionOSConfig) -> RuntimeProfile | None:
+    """Load the requested runtime profile when the operator selected one."""
+    if config.profile_name is None and config.profile_path is None:
+        return None
+    return load_profile(name=config.profile_name, path=config.profile_path)
 
 
 def _validate_input_path(config: VisionOSConfig) -> None:
@@ -383,6 +390,9 @@ def main() -> int:
     """Run the end-to-end source loop until the user quits or the source is exhausted."""
     try:
         config = parse_args()
+        profile = _load_selected_profile(config)
+        if profile is not None:
+            config = _apply_profile_defaults(config, profile)
         _validate_input_path(config)
         policy = load_policy(name=config.policy_name, path=config.policy_path)
         zones = load_zones(config.zones_path) if config.zones_path else ()
@@ -390,7 +400,7 @@ def main() -> int:
         logger = VisionLogger(config.log_json)
         renderer = FrameRenderer(config.overlay_mode)
         source = _build_source(config)
-    except (FileNotFoundError, PolicyValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
+    except (FileNotFoundError, PolicyValidationError, ProfileValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
