@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from common.models import Decision, TemporalState, VisionEvent
+from zones.models import ZoneRuntimeState
+
 
 @dataclass(slots=True, frozen=True)
 class TriggerCondition:
@@ -87,3 +90,50 @@ class TriggerConfig:
     """Loaded trigger rules for the runtime."""
 
     rules: tuple[TriggerRule, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class TriggerSnapshot:
+    """Frame-scoped runtime state evaluated by the trigger engine."""
+
+    timestamp: float
+    decision: Decision
+    temporal_state: TemporalState
+    events: tuple[VisionEvent, ...] = ()
+    zone_states: tuple[ZoneRuntimeState, ...] = ()
+
+
+@dataclass(slots=True)
+class TriggerRuleState:
+    """Per-rule lifecycle state retained across packets."""
+
+    armed: bool = True
+    condition_was_true: bool = False
+    fired_in_current_streak: bool = False
+    satisfied_since: float | None = None
+    last_fired_at: float | None = None
+    fire_count: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class TriggeredActionRecord:
+    """One attempted action emitted by the trigger engine."""
+
+    trigger_id: str
+    action_type: str
+    timestamp: float
+    target: str | None
+    payload: dict[str, object]
+    success: bool
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "trigger_id": self.trigger_id,
+            "action_type": self.action_type,
+            "timestamp": self.timestamp,
+            "target": self.target,
+            "payload": self.payload,
+            "success": self.success,
+            "error": self.error,
+        }
