@@ -8,6 +8,7 @@ from pathlib import Path
 import cv2
 import yaml
 
+from common.profile import load_profile
 from integrations import load_trigger_config
 
 
@@ -68,3 +69,13 @@ def test_demo_trigger_config_exists_and_has_rules() -> None:
     assert len(payload["triggers"]) >= 2
     assert len(config.rules) >= 2
     assert any(rule.condition and rule.condition.source == "decision.label" for rule in config.rules)
+
+
+def test_demo_profile_manifest_exists_and_resolves_assets() -> None:
+    profile_path = DEMO_DIR / "sample-profile.yaml"
+    profile = load_profile(path=str(profile_path))
+
+    assert profile_path.is_file()
+    assert profile.profile_id == "sample_demo"
+    assert profile.zones_path == str(DEMO_DIR / "sample-zones.yaml")
+    assert profile.trigger_path == str(DEMO_DIR / "sample-triggers.yaml")
