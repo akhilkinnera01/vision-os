@@ -61,3 +61,20 @@ def test_dispatcher_logs_failure_and_continues_to_other_actions(
     assert records[0].error == "boom"
     assert records[1].success is True
     assert (tmp_path / "events.jsonl").is_file()
+
+
+def test_dispatcher_supports_structured_log_actions(capsys) -> None:
+    rule = TriggerRule(
+        rule_id="focus-session",
+        actions=(TriggerAction(action_type="log", target="trigger_fired"),),
+    )
+    dispatcher = TriggerDispatcher(logger=VisionLogger(json_mode=False))
+    payload = {"trigger_id": "focus-session", "label": "Focused Work"}
+
+    records = dispatcher.dispatch(rule, timestamp=8.0, payload=payload)
+
+    stderr = capsys.readouterr().err
+    assert "trigger_fired" in stderr
+    assert len(records) == 1
+    assert records[0].action_type == "log"
+    assert records[0].success is True
