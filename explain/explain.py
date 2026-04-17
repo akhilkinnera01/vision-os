@@ -11,6 +11,7 @@ from common.models import (
     TemporalState,
     VisionEvent,
 )
+from zones.models import ZoneRuntimeState
 
 
 class ExplanationEngine:
@@ -24,10 +25,15 @@ class ExplanationEngine:
         temporal_state: TemporalState,
         runtime_metrics: RuntimeMetrics,
         events: list[VisionEvent] | None = None,
+        zone_states: tuple[ZoneRuntimeState, ...] = (),
     ) -> Explanation:
         """Summarize why the system chose the current scene label."""
         top_signals = list(scene_context.signals[:3]) or ["scene cues are limited"]
         recent_event_types = [event.event_type for event in (events or [])]
+        zone_summaries = [
+            f"{zone_state.zone_name}={zone_state.context.label.value}"
+            for zone_state in zone_states[:4]
+        ]
         scores = {
             "focus": round(decision.scene_metrics.focus_score, 3),
             "distraction": round(decision.scene_metrics.distraction_score, 3),
@@ -60,6 +66,10 @@ class ExplanationEngine:
                 f"{', '.join(recent_event_types) if recent_event_types else 'none'}"
             ),
             (
+                "Zones: "
+                f"{', '.join(zone_summaries) if zone_summaries else 'none'}"
+            ),
+            (
                 "Spatial: "
                 f"laptop_near_person={features.laptop_near_person}, "
                 f"phone_near_person={features.phone_near_person}, "
@@ -76,4 +86,5 @@ class ExplanationEngine:
             debug_lines=debug_lines,
             scores=scores,
             recent_events=recent_event_types,
+            zone_summaries=zone_summaries,
         )

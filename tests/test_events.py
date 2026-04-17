@@ -13,6 +13,7 @@ from common.models import (
 )
 from common.policy import load_policy
 from events.emitter import EventEmitter
+from zones import ZoneContext, ZoneContextLabel, ZoneDecision, ZoneFeatureSet, ZoneRuntimeState, ZoneTemporalState, ZoneType
 
 
 def make_actor_state(track_id: int, interaction_state: str, previous: str = "idle") -> ActorState:
@@ -36,6 +37,23 @@ def make_decision(label: ContextLabel) -> Decision:
         confidence=0.8,
         action="observe",
         scene_metrics=SceneMetrics(),
+    )
+
+
+def make_zone_state(zone_id: str, label: ZoneContextLabel) -> ZoneRuntimeState:
+    return ZoneRuntimeState(
+        zone_id=zone_id,
+        zone_name=zone_id.replace("_", " ").title(),
+        zone_type=ZoneType.OCCUPANCY,
+        feature_set=ZoneFeatureSet(
+            zone_id=zone_id,
+            zone_name=zone_id,
+            zone_type=ZoneType.OCCUPANCY,
+            occupied=label != ZoneContextLabel.EMPTY,
+        ),
+        context=ZoneContext(label=label, confidence=0.82),
+        decision=ZoneDecision(label=label, confidence=0.82, action="observe"),
+        temporal_state=ZoneTemporalState(stability_score=0.9),
     )
 
 
@@ -130,3 +148,46 @@ def test_collaboration_events_emit_form_and_disperse() -> None:
 
     assert [event.event_type for event in formed] == ["group_formed", "collaboration_increasing"]
     assert [event.event_type for event in dispersed] == ["group_dispersed"]
+
+
+def test_zone_events_emit_once_per_transition() -> None:
+    policy = load_policy("default")
+    emitter = EventEmitter(policy.events)
+
+    first = emitter.update(
+        timestamp=0.0,
+        decision=make_decision(ContextLabel.CASUAL_USE),
+        temporal_state=TemporalState(metrics=SceneMetrics(stability_score=0.8)),
+        actor_frame_state=ActorFrameState(),
+        features=SceneFeatures(),
+        zone_states=(make_zone_state("desk_a", ZoneContextLabel.EMPTY),),
+    )
+    second = emitter.update(
+        timestamp=1.0,
+        decision=make_decision(ContextLabel.FOCUSED_WORK),
+        temporal_state=TemporalState(metrics=SceneMetrics(stability_score=0.82)),
+        actor_frame_state=ActorFrameState(),
+        features=SceneFeatures(),
+        zone_states=(make_zone_state("desk_a", ZoneContextLabel.SOLO_FOCUS),),
+    )
+    repeated = emitter.update(
+        timestamp=2.0,
+        decision=make_decision(ContextLabel.FOCUSED_WORK),
+        temporal_state=TemporalState(metrics=SceneMetrics(stability_score=0.84)),
+        actor_frame_state=ActorFrameState(),
+        features=SceneFeatures(),
+        zone_states=(make_zone_state("desk_a", ZoneContextLabel.SOLO_FOCUS),),
+    )
+    cleared = emitter.update(
+        timestamp=3.0,
+        decision=make_decision(ContextLabel.CASUAL_USE),
+        temporal_state=TemporalState(metrics=SceneMetrics(stability_score=0.88)),
+        actor_frame_state=ActorFrameState(),
+        features=SceneFeatures(),
+        zone_states=(make_zone_state("desk_a", ZoneContextLabel.EMPTY),),
+    )
+
+    assert first == []
+    assert [event.event_type for event in second] == ["zone_occupied", "zone_focus_started"]
+    assert repeated == []
+    assert [event.event_type for event in cleared] == ["zone_cleared"]

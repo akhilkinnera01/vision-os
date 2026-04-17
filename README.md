@@ -36,6 +36,7 @@ to model what is happening over time.
 - spatial signals such as person-near-laptop, person-near-phone, clustered people, and centered monitors
 - temporal memory for sustained focus, distraction spikes, collaboration growth, and unstable context
 - typed runtime events for transitions, distractions, collaboration changes, and stability changes
+- zone-aware reasoning for named desks, benches, and room areas through `--zones-file`
 - structured explanations for both compact and debug rendering
 - benchmark output with FPS, latency, dropped frames, switch rate, stability score, and stage timings
 - replay recording for deterministic debugging and regression testing
@@ -57,6 +58,7 @@ vision-os/
 ├── explain/
 ├── runtime/
 ├── telemetry/
+├── zones/
 ├── ui/
 ├── policies/
 ├── demo/
@@ -109,6 +111,8 @@ python app.py \
 The repo already ships these demo artifacts from the sample flow:
 
 - `demo/sample.mp4`
+- `demo/sample-zones.yaml`
+- `demo/sample-triggers.yaml`
 - `demo/demo-replay.jsonl`
 - `demo/demo-benchmark.json`
 - `demo/sample-overlay.png`
@@ -154,6 +158,36 @@ Recommended when you want:
 - easy replay generation
 - a reproducible bug report
 
+### Zone-aware mode
+
+Use this when one camera should act like many virtual sensors:
+
+```bash
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --zones-file demo/sample-zones.yaml \
+  --overlay-mode debug
+```
+
+With a zone file, Vision OS keeps the existing frame-level scene label and also
+computes zone-local state such as `empty`, `occupied`, `solo_focus`, and
+`group_activity` for each configured region.
+
+### Triggered zone mode
+
+Use this when zone events should also fan out to local logs, webhooks, or a narrow
+MQTT output:
+
+```bash
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --zones-file demo/sample-zones.yaml \
+  --trigger-file demo/sample-triggers.yaml \
+  --overlay-mode debug
+```
+
 ### Replay mode
 
 Use this when you want to inspect reasoning without rerunning YOLO:
@@ -195,6 +229,8 @@ Replay mode is good for:
 | `--overlay-mode compact|debug` | choose a lighter or fuller UI overlay |
 | `--record PATH` | write replayable detections and events to JSONL |
 | `--benchmark-output PATH` | write benchmark metrics to JSON |
+| `--zones-file PATH` | load a YAML file with named polygon zones |
+| `--trigger-file PATH` | load a YAML file with event trigger outputs |
 | `--headless` | disable the OpenCV window |
 | `--log-json` | emit structured logs to stderr |
 | `--max-frames N` | stop after N processed frames |
@@ -268,13 +304,67 @@ python app.py \
   --policy-file path/to/custom-policy.yaml
 ```
 
+## Zone Files
+
+Zone files are plain YAML and define named polygons in frame coordinates.
+
+```yaml
+zones:
+  - id: desk_a
+    name: Desk A
+    type: occupancy
+    polygon:
+      - [40, 220]
+      - [320, 220]
+      - [320, 520]
+      - [40, 520]
+```
+
+Supported V1 zone types:
+
+- `occupancy`
+- `activity`
+- `transition`
+
+Current zone-local labels:
+
+- `empty`
+- `occupied`
+- `solo_focus`
+- `group_activity`
+- `casual_occupancy`
+
+Zone transitions are emitted as typed events such as `zone_occupied`, `zone_cleared`,
+`zone_focus_started`, and `zone_group_started`, and replay artifacts now persist the
+serialized zone timeline for each frame.
+
+## Trigger Files
+
+Trigger files let you match emitted events and send them to one or more outputs.
+
+```yaml
+triggers:
+  - id: desk-a-focus-log
+    event_type: zone_focus_started
+    zone_id: desk_a
+    log_path: out/zone-events.jsonl
+```
+
+Supported outputs in the current narrow surface:
+
+- local JSONL event log via `log_path`
+- HTTP webhook via `webhook_url`
+- plain MQTT publish via `mqtt_host`, `mqtt_port`, and `mqtt_topic`
+
+Trigger failures are logged and do not stop the inference loop.
+
 ## Output Files
 
 ### Replay file
 
 When you pass `--record`, Vision OS writes a JSONL replay artifact. Each line stores
-the recorded detections and emitted events for one frame so you can rerun the reasoning
-path later without touching the detector.
+the recorded detections, emitted events, and serialized zone state for one frame so you
+can rerun or inspect the reasoning path later without touching the detector.
 
 Use replay files when you want:
 
@@ -310,6 +400,7 @@ The codebase is split into focused modules so each stage can evolve independentl
 - `features/builder.py`: converts detections and actor state into booleans and numeric signals
 - `state/`: stores rolling scene memory and actor timelines
 - `events/`: reduces state changes into typed runtime events
+- `zones/`: loads zone maps, assigns detections, and derives zone-local reasoning state
 - `context/rules.py`: maps features and temporal state to scene context
 - `decision/engine.py`: produces the final scene label, action, and risk flags
 - `explain/explain.py`: creates human-readable explanations

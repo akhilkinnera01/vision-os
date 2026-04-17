@@ -25,8 +25,21 @@ from decision.engine import DecisionEngine
 from explain.explain import ExplanationEngine
 from features.builder import FeatureBuilder
 from runtime.benchmark import BenchmarkTracker
-from runtime.io import ReplayFrameSource, ReplayRecorder
+from runtime.io import FramePacket, ReplayFrameSource, ReplayRecorder
+from runtime.pipeline import VisionPipeline
 from state.memory import TemporalMemory
+from common.policy import load_policy
+from zones import (
+    Zone,
+    ZoneContext,
+    ZoneContextLabel,
+    ZoneDecision,
+    ZoneFeatureSet,
+    ZonePoint,
+    ZoneRuntimeState,
+    ZoneTemporalState,
+    ZoneType,
+)
 
 
 def make_detection(
@@ -184,6 +197,20 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
     output_path = tmp_path / "session.jsonl"
     recorder = ReplayRecorder(str(output_path), source_mode=SourceMode.WEBCAM)
     detections = [make_detection("person", (100, 100, 250, 400)), make_detection("laptop", (260, 280, 480, 420))]
+    zone_state = ZoneRuntimeState(
+        zone_id="desk_a",
+        zone_name="Desk A",
+        zone_type=ZoneType.OCCUPANCY,
+        feature_set=ZoneFeatureSet(
+            zone_id="desk_a",
+            zone_name="Desk A",
+            zone_type=ZoneType.OCCUPANCY,
+            occupied=True,
+        ),
+        context=ZoneContext(label=ZoneContextLabel.SOLO_FOCUS, confidence=0.86),
+        decision=ZoneDecision(label=ZoneContextLabel.SOLO_FOCUS, confidence=0.86, action="Preserve focus-friendly zone state"),
+        temporal_state=ZoneTemporalState(stability_score=0.92),
+    )
     recorder.write(
         frame_index=3,
         timestamp=1.25,
@@ -197,6 +224,7 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
                 scene_label="Focused Work",
             )
         ],
+        zone_states=(zone_state,),
     )
     recorder.close()
 
@@ -210,6 +238,8 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
     assert packet.replay_detections[0].label == "person"
     assert packet.replay_events is not None
     assert packet.replay_events[0].event_type == "focus_sustained"
+    assert packet.replay_zone_states is not None
+    assert packet.replay_zone_states[0]["zone_id"] == "desk_a"
     assert packet.frame.shape == (720, 1280, 3)
 
 
@@ -259,6 +289,100 @@ def test_replay_record_serialization_is_stable() -> None:
     assert restored.frame_index == 2
     assert restored.source_mode.value == "video"
     assert restored.detections[0].bbox.x1 == 10
+
+
+def test_pipeline_builds_zone_runtime_states_for_replay_packets() -> None:
+    zones = (
+        Zone(
+            zone_id="desk_a",
+            name="Desk A",
+            zone_type=ZoneType.OCCUPANCY,
+            polygon=(
+                ZonePoint(0.0, 0.0),
+                ZonePoint(420.0, 0.0),
+                ZonePoint(420.0, 420.0),
+                ZonePoint(0.0, 420.0),
+            ),
+        ),
+        Zone(
+            zone_id="desk_b",
+            name="Desk B",
+            zone_type=ZoneType.OCCUPANCY,
+            polygon=(
+                ZonePoint(500.0, 0.0),
+                ZonePoint(900.0, 0.0),
+                ZonePoint(900.0, 420.0),
+                ZonePoint(500.0, 420.0),
+            ),
+        ),
+    )
+    pipeline = VisionPipeline(
+        VisionOSConfig(source_mode=SourceMode.REPLAY),
+        policy=load_policy("default"),
+        zones=zones,
+    )
+    packet = FramePacket(
+        frame_index=0,
+        timestamp=0.0,
+        frame=np.zeros((720, 1280, 3), dtype=np.uint8),
+        source_mode=SourceMode.REPLAY,
+        replay_detections=[
+            make_detection("person", (80, 80, 180, 320)),
+            make_detection("laptop", (120, 240, 260, 330)),
+        ],
+    )
+
+    output = pipeline.process(packet)
+    zone_states = {zone_state.zone_id: zone_state for zone_state in output.zone_states}
+
+    assert set(zone_states) == {"desk_a", "desk_b"}
+    assert zone_states["desk_a"].context.label.value == "solo_focus"
+    assert zone_states["desk_a"].feature_set.features.person_count == 1
+    assert zone_states["desk_b"].context.label.value == "empty"
+    assert zone_states["desk_b"].feature_set.features.person_count == 0
+
+
+def test_zone_runtime_states_stay_stable_across_replay_sequence() -> None:
+    zones = (
+        Zone(
+            zone_id="desk_a",
+            name="Desk A",
+            zone_type=ZoneType.OCCUPANCY,
+            polygon=(
+                ZonePoint(0.0, 0.0),
+                ZonePoint(420.0, 0.0),
+                ZonePoint(420.0, 420.0),
+                ZonePoint(0.0, 420.0),
+            ),
+        ),
+    )
+    pipeline = VisionPipeline(
+        VisionOSConfig(source_mode=SourceMode.REPLAY),
+        policy=load_policy("default"),
+        zones=zones,
+    )
+    detections = [
+        make_detection("person", (80, 80, 180, 320)),
+        make_detection("laptop", (120, 240, 260, 330)),
+    ]
+
+    last_output = None
+    for timestamp in (0.0, 4.0, 8.0):
+        packet = FramePacket(
+            frame_index=int(timestamp),
+            timestamp=timestamp,
+            frame=np.zeros((720, 1280, 3), dtype=np.uint8),
+            source_mode=SourceMode.REPLAY,
+            replay_detections=detections,
+        )
+        last_output = pipeline.process(packet)
+
+    assert last_output is not None
+    zone_state = last_output.zone_states[0]
+    assert zone_state.context.label.value == "solo_focus"
+    assert zone_state.temporal_state.current_label_duration_seconds == 8.0
+    assert zone_state.temporal_state.occupied_duration_seconds == 8.0
+    assert zone_state.temporal_state.stability_score >= 0.95
 
 
 def test_renderer_safe_shape_fixture() -> None:

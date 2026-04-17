@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from common.models import BoundingBox, Decision, Detection, Explanation, OverlayMode, RuntimeMetrics
+from zones.models import ZoneRuntimeState
 
 
 @dataclass(slots=True, frozen=True)
@@ -47,6 +48,7 @@ class FrameRenderer:
     HEADER_COLOR = (20, 20, 20)
     HEADER_TEXT = (245, 245, 245)
     RISK_COLOR = (70, 180, 255)
+    ZONE_COLOR = (255, 200, 90)
     FONT = cv2.FONT_HERSHEY_SIMPLEX
     PANEL_PADDING_X = 16
     PANEL_PADDING_Y = 16
@@ -73,10 +75,12 @@ class FrameRenderer:
         decision: Decision,
         explanation: Explanation,
         runtime_metrics: RuntimeMetrics,
+        zone_states: tuple[ZoneRuntimeState, ...] = (),
     ) -> np.ndarray:
         """Create an annotated frame without mutating the caller's input."""
         annotated = frame.copy()
         header_bottom = self._draw_header(annotated, decision, explanation, runtime_metrics)
+        self._draw_zone_overlays(annotated, zone_states, header_bottom)
 
         for detection in detections:
             bbox = detection.bbox
@@ -168,6 +172,15 @@ class FrameRenderer:
             max_lines=2,
         )
         cursor_top = self._append_lines(rows, metric_lines, self.METRIC_STYLE, cursor_top)
+
+        if explanation.zone_summaries:
+            zone_lines = self._wrap_text_to_width(
+                f"Zones: {', '.join(explanation.zone_summaries)}",
+                max_width=content_width,
+                style=self.BODY_STYLE,
+                max_lines=3 if self.overlay_mode == OverlayMode.DEBUG else 2,
+            )
+            cursor_top = self._append_lines(rows, zone_lines, self.BODY_STYLE, cursor_top)
 
         if self.overlay_mode == OverlayMode.DEBUG:
             for line in explanation.debug_lines[:4]:
@@ -309,3 +322,36 @@ class FrameRenderer:
         if preferred_baseline >= safe_baseline:
             return preferred_baseline
         return max(bbox.y1 + text_height + self.LABEL_MARGIN, safe_baseline)
+
+    def _draw_zone_overlays(
+        self,
+        frame: np.ndarray,
+        zone_states: tuple[ZoneRuntimeState, ...],
+        header_bottom: int,
+    ) -> None:
+        """Draw configured zone polygons and their current label."""
+        for zone_state in zone_states:
+            if not zone_state.polygon:
+                continue
+
+            polygon = np.array([(int(point.x), int(point.y)) for point in zone_state.polygon], dtype=np.int32)
+            cv2.polylines(frame, [polygon], isClosed=True, color=self.ZONE_COLOR, thickness=2)
+
+            min_x = int(min(point.x for point in zone_state.polygon))
+            min_y = int(min(point.y for point in zone_state.polygon))
+            label = f"{zone_state.zone_name}: {zone_state.context.label.value}"
+            _, text_height, baseline = self._measure_text(label, self.DEBUG_STYLE)
+            baseline_y = max(
+                header_bottom + text_height + baseline + self.LABEL_MARGIN,
+                min_y + text_height + baseline + self.LABEL_MARGIN,
+            )
+            cv2.putText(
+                frame,
+                label,
+                (min_x + 4, baseline_y),
+                self.FONT,
+                self.DEBUG_STYLE.scale,
+                self.ZONE_COLOR,
+                self.DEBUG_STYLE.thickness,
+                cv2.LINE_AA,
+            )

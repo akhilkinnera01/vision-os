@@ -25,3 +25,8 @@ class CollaborationEvent(VisionEvent):
 @dataclass(slots=True, frozen=True)
 class StabilityEvent(VisionEvent):
     category: str = "stability"
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneEvent(VisionEvent):
+    category: str = "zone"

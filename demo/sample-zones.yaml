@@ -1,0 +1,27 @@
+zones:
+  - id: desk_a
+    name: Desk A
+    type: occupancy
+    polygon:
+      - [40, 220]
+      - [320, 220]
+      - [320, 520]
+      - [40, 520]
+
+  - id: desk_b
+    name: Desk B
+    type: occupancy
+    polygon:
+      - [360, 220]
+      - [700, 220]
+      - [700, 520]
+      - [360, 520]
+
+  - id: whiteboard
+    name: Whiteboard
+    type: activity
+    polygon:
+      - [760, 80]
+      - [1220, 80]
+      - [1220, 420]
+      - [760, 420]

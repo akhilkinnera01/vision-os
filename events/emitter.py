@@ -5,6 +5,7 @@ from __future__ import annotations
 from common.models import ActorFrameState, Decision, SceneFeatures, TemporalState, VisionEvent
 from common.policy import EventPolicy
 from events.reducer import EventReducer
+from zones.models import ZoneContextLabel, ZoneRuntimeState
 
 
 class EventEmitter:
@@ -18,6 +19,9 @@ class EventEmitter:
         self._collaboration_increasing_active = False
         self._unstable_active = False
         self._distraction_active_ids: set[int] = set()
+        self._occupied_zone_ids: set[str] = set()
+        self._focus_zone_ids: set[str] = set()
+        self._group_zone_ids: set[str] = set()
 
     def update(
         self,
@@ -26,6 +30,7 @@ class EventEmitter:
         temporal_state: TemporalState,
         actor_frame_state: ActorFrameState,
         features: SceneFeatures,
+        zone_states: tuple[ZoneRuntimeState, ...] = (),
     ) -> list[VisionEvent]:
         events: list[VisionEvent] = []
 
@@ -67,4 +72,29 @@ class EventEmitter:
 
         events.extend(self.reducer.stability_events(timestamp, temporal_state, self._unstable_active))
         self._unstable_active = temporal_state.metrics.context_unstable
+        events.extend(self._zone_events(timestamp, zone_states))
+        return events
+
+    def _zone_events(self, timestamp: float, zone_states: tuple[ZoneRuntimeState, ...]) -> list[VisionEvent]:
+        if not zone_states:
+            return []
+
+        events: list[VisionEvent] = []
+        occupied_now = {zone_state.zone_id for zone_state in zone_states if zone_state.context.label != ZoneContextLabel.EMPTY}
+        focus_now = {zone_state.zone_id for zone_state in zone_states if zone_state.context.label == ZoneContextLabel.SOLO_FOCUS}
+        group_now = {zone_state.zone_id for zone_state in zone_states if zone_state.context.label == ZoneContextLabel.GROUP_ACTIVITY}
+        by_id = {zone_state.zone_id: zone_state for zone_state in zone_states}
+
+        for zone_id in sorted(occupied_now - self._occupied_zone_ids):
+            events.append(self.reducer.zone_occupied(timestamp, by_id[zone_id]))
+        for zone_id in sorted(self._occupied_zone_ids - occupied_now):
+            events.append(self.reducer.zone_cleared(timestamp, by_id[zone_id]))
+        for zone_id in sorted(focus_now - self._focus_zone_ids):
+            events.append(self.reducer.zone_focus_started(timestamp, by_id[zone_id]))
+        for zone_id in sorted(group_now - self._group_zone_ids):
+            events.append(self.reducer.zone_group_started(timestamp, by_id[zone_id]))
+
+        self._occupied_zone_ids = occupied_now
+        self._focus_zone_ids = focus_now
+        self._group_zone_ids = group_now
         return events
