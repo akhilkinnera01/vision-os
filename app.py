@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import queue
 import sys
 import threading
@@ -12,6 +13,7 @@ import cv2
 
 from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
+from common.profile import RuntimeProfile
 from common.policy import PolicyValidationError, load_policy
 from integrations import IntegrationConfigError, load_trigger_config
 from runtime.benchmark import BenchmarkTracker
@@ -124,6 +126,20 @@ def _build_source(config: VisionOSConfig):
     if config.source_mode == SourceMode.VIDEO:
         return VideoFrameSource(config.input_path or "")
     return ReplayFrameSource(config.input_path or "")
+
+
+def _apply_profile_defaults(config: VisionOSConfig, profile: RuntimeProfile) -> VisionOSConfig:
+    """Fill unresolved runtime settings from a selected profile while preserving explicit flags."""
+    resolved = config
+    if not resolved.policy_explicit:
+        resolved = replace(resolved, policy_name=profile.policy_name)
+    if not resolved.zones_explicit and profile.zones_path is not None:
+        resolved = replace(resolved, zones_path=profile.zones_path)
+    if not resolved.trigger_explicit and profile.trigger_path is not None:
+        resolved = replace(resolved, trigger_path=profile.trigger_path)
+    if not resolved.overlay_mode_explicit:
+        resolved = replace(resolved, overlay_mode=profile.presentation.overlay_mode)
+    return resolved
 
 
 def _validate_input_path(config: VisionOSConfig) -> None:
