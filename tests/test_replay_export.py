@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from common.models import Detection, BoundingBox, HistoryRecord, ReplayRecord, SourceMode
+from runtime.io import ReplayFrameSource, ReplayRecorder
 
 
 def _detection() -> Detection:
@@ -51,3 +54,31 @@ def test_replay_record_from_dict_keeps_old_payloads_compatible() -> None:
     )
 
     assert restored.history_record is None
+
+
+def test_replay_recorder_and_source_preserve_history_record(tmp_path: Path) -> None:
+    output_path = tmp_path / "session.jsonl"
+    recorder = ReplayRecorder(str(output_path), source_mode=SourceMode.VIDEO)
+    recorder.write(
+        frame_index=2,
+        timestamp=1.5,
+        frame_shape=(720, 1280),
+        detections=[_detection()],
+        history_record=HistoryRecord(
+            frame_index=2,
+            timestamp=1.5,
+            scene_label="Focused Work",
+            confidence=0.88,
+            action="observe",
+            event_types=("focus_sustained",),
+        ),
+    )
+    recorder.close()
+
+    source = ReplayFrameSource(str(output_path))
+    packet = source.read()
+    source.close()
+
+    assert packet is not None
+    assert packet.replay_history_record is not None
+    assert packet.replay_history_record["scene_label"] == "Focused Work"

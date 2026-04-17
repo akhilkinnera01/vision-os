@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
-from common.models import Detection, ReplayRecord, SourceMode, VisionEvent
+from common.models import Detection, HistoryRecord, ReplayRecord, SourceMode, VisionEvent
 
 if TYPE_CHECKING:
     from zones.models import ZoneRuntimeState
@@ -34,6 +34,7 @@ class FramePacket:
     replay_events: list[VisionEvent] | None = None
     replay_zone_states: list[dict[str, object]] | None = None
     replay_trigger_records: list[dict[str, object]] | None = None
+    replay_history_record: dict[str, object] | None = None
 
 
 class WebcamFrameSource:
@@ -119,6 +120,7 @@ class ReplayFrameSource:
             replay_events=record.events,
             replay_zone_states=record.zone_states,
             replay_trigger_records=record.trigger_records,
+            replay_history_record=None if record.history_record is None else record.history_record.to_dict(),
         )
 
     def is_opened(self) -> bool:
@@ -146,6 +148,7 @@ class ReplayRecorder:
         events: list[VisionEvent] | None = None,
         zone_states: tuple["ZoneRuntimeState", ...] | None = None,
         trigger_records: tuple[dict[str, object], ...] | tuple[object, ...] | None = None,
+        history_record: HistoryRecord | None = None,
     ) -> None:
         record = ReplayRecord(
             frame_index=frame_index,
@@ -159,6 +162,7 @@ class ReplayRecorder:
                 item if isinstance(item, dict) else item.to_dict()
                 for item in (trigger_records or ())
             ],
+            history_record=history_record,
         )
         self._file.write(json.dumps(record.to_dict()) + "\n")
         self._file.flush()
