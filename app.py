@@ -418,7 +418,7 @@ def _summarize_validation_report(report: ValidationReport) -> tuple[str, str]:
 def _workspace_manifest_to_config(workspace: WorkspaceManifest) -> VisionOSConfig:
     """Reconstruct a validation-ready config from a saved workspace manifest."""
     if workspace.config_path is not None:
-        return load_runtime_config_file(workspace.config_path)
+        return _overlay_workspace_manifest(load_runtime_config_file(workspace.config_path), workspace)
 
     camera_index = 0
     input_path = workspace.source_ref
@@ -442,6 +442,40 @@ def _workspace_manifest_to_config(workspace: WorkspaceManifest) -> VisionOSConfi
         session_summary_output_path=workspace.outputs.session_summary_path,
         policy_name=workspace.policy_name or "default",
         policy_path=workspace.policy_path,
+    )
+
+
+def _overlay_workspace_manifest(config: VisionOSConfig, workspace: WorkspaceManifest) -> VisionOSConfig:
+    """Treat the saved workspace manifest as the browser's source of truth over config files."""
+    camera_index = config.camera_index
+    input_path = config.input_path
+    if workspace.source_mode == SourceMode.WEBCAM.value:
+        camera_index = int(workspace.source_ref or "0")
+        input_path = None
+    elif workspace.source_ref is not None:
+        input_path = workspace.source_ref
+
+    return replace(
+        config,
+        config_path=workspace.config_path,
+        camera_index=camera_index,
+        source_mode=SourceMode(workspace.source_mode),
+        input_path=input_path,
+        profile_name=workspace.profile_id,
+        profile_path=workspace.profile_path,
+        policy_name=workspace.policy_name or config.policy_name,
+        policy_path=workspace.policy_path,
+        zones_path=workspace.zones_path,
+        trigger_path=workspace.triggers_path,
+        integrations_path=workspace.integrations_path,
+        record_path=workspace.outputs.replay_path,
+        benchmark_output_path=workspace.outputs.benchmark_path,
+        history_output_path=workspace.outputs.history_path,
+        session_summary_output_path=workspace.outputs.session_summary_path,
+        policy_explicit=True,
+        zones_explicit=True,
+        trigger_explicit=True,
+        integrations_explicit=True,
     )
 
 

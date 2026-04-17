@@ -263,6 +263,58 @@ def test_main_persists_validation_summary_for_launchpad(monkeypatch, tmp_path: P
     assert validation.summary == "Camera ready"
 
 
+def test_workspace_manifest_to_config_applies_manifest_overrides_over_saved_config(tmp_path: Path) -> None:
+    replay_path = tmp_path / "demo-replay.jsonl"
+    replay_path.write_text("{}\n", encoding="utf-8")
+    config_path = tmp_path / "visionos.config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "source: replay",
+                f"input: {replay_path.name}",
+                "profile: meeting_room",
+                "overlay_mode: debug",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = app._workspace_manifest_to_config(
+        app.WorkspaceManifest(
+            workspace_id="meeting-room-replay",
+            name="Meeting Room Replay",
+            source_mode="video",
+            config_path=str(config_path),
+            source_ref="demo/sample.mp4",
+            profile_id="workstation",
+            policy_name="office",
+            zones_path="demo/sample-zones.yaml",
+            triggers_path="demo/sample-triggers.yaml",
+            integrations_path="demo/sample-integrations.yaml",
+            outputs=app.ArtifactIndex(
+                replay_path="out/browser-session.jsonl",
+                history_path="out/browser-history.jsonl",
+                benchmark_path="out/browser-benchmark.json",
+                session_summary_path="out/browser-summary.json",
+            ),
+        )
+    )
+
+    assert config.config_path == str(config_path)
+    assert config.source_mode == SourceMode.VIDEO
+    assert config.input_path == "demo/sample.mp4"
+    assert config.profile_name == "workstation"
+    assert config.policy_name == "office"
+    assert config.zones_path == "demo/sample-zones.yaml"
+    assert config.trigger_path == "demo/sample-triggers.yaml"
+    assert config.integrations_path == "demo/sample-integrations.yaml"
+    assert config.record_path == "out/browser-session.jsonl"
+    assert config.history_output_path == "out/browser-history.jsonl"
+    assert config.benchmark_output_path == "out/browser-benchmark.json"
+    assert config.session_summary_output_path == "out/browser-summary.json"
+
+
 def test_main_persists_completed_session_for_launchpad(monkeypatch, tmp_path: Path) -> None:
     config = VisionOSConfig(
         source_mode=SourceMode.VIDEO,

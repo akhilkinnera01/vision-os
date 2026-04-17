@@ -144,6 +144,10 @@ def test_runtime_host_uses_saved_config_when_available(monkeypatch) -> None:
         "--headless",
         "--config",
         "visionos.config.yaml",
+        "--source",
+        "webcam",
+        "--camera",
+        "0",
     ]
 
 
@@ -171,8 +175,69 @@ def test_runtime_host_can_override_recording_path_for_saved_config_runs(monkeypa
         "--headless",
         "--config",
         "visionos.config.yaml",
+        "--source",
+        "webcam",
+        "--camera",
+        "0",
         "--record",
         "/repo/vision-os/.visionos/artifacts/desk-a-recording-1.jsonl",
+    ]
+
+
+def test_runtime_host_appends_manifest_overrides_for_saved_config_runs(monkeypatch) -> None:
+    captured = {}
+    fake_process = _FakeProcess()
+    monkeypatch.setattr(
+        "server.runtime_host.subprocess.Popen",
+        lambda command, cwd=None: captured.update({"command": command, "cwd": cwd}) or fake_process,
+    )
+    host = RuntimeHost(app_path=Path("/repo/vision-os/app.py"), python_executable="python-test")
+    workspace = WorkspaceManifest(
+        workspace_id="desk-a",
+        name="Desk A",
+        source_mode="video",
+        config_path="visionos.config.yaml",
+        source_ref="demo/sample.mp4",
+        profile_id="workstation",
+        policy_name="office",
+        zones_path="demo/sample-zones.yaml",
+        triggers_path="demo/sample-triggers.yaml",
+        integrations_path="demo/sample-integrations.yaml",
+        outputs=ArtifactIndex(
+            history_path="out/history.jsonl",
+            benchmark_path="out/benchmark.json",
+            session_summary_path="out/session-summary.json",
+        ),
+    )
+
+    host.start(workspace=workspace)
+
+    assert captured["command"] == [
+        "python-test",
+        "/repo/vision-os/app.py",
+        "--headless",
+        "--config",
+        "visionos.config.yaml",
+        "--source",
+        "video",
+        "--input",
+        "demo/sample.mp4",
+        "--profile",
+        "workstation",
+        "--policy",
+        "office",
+        "--zones-file",
+        "demo/sample-zones.yaml",
+        "--trigger-file",
+        "demo/sample-triggers.yaml",
+        "--integrations-file",
+        "demo/sample-integrations.yaml",
+        "--history-output",
+        "out/history.jsonl",
+        "--benchmark-output",
+        "out/benchmark.json",
+        "--session-summary-output",
+        "out/session-summary.json",
     ]
 
 
