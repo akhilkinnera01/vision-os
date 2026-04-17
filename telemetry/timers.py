@@ -10,7 +10,7 @@ class StageTimer:
     """Collect lightweight stage timings for a single pipeline pass."""
 
     def __init__(self) -> None:
-        self._timings: dict[str, float] = {}
+        self._cumulative: dict[str, float] = {}
 
     @contextmanager
     def measure(self, stage_name: str):
@@ -18,7 +18,8 @@ class StageTimer:
         try:
             yield
         finally:
-            self._timings[stage_name] = (time.perf_counter() - start) * 1000.0
+            duration = (time.perf_counter() - start) * 1000.0
+            self._cumulative[stage_name] = self._cumulative.get(stage_name, 0.0) + duration
 
     def snapshot(self) -> dict[str, float]:
-        return {name: round(value, 3) for name, value in self._timings.items()}
+        return {name: round(value, 3) for name, value in self._cumulative.items()}
