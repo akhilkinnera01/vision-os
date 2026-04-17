@@ -24,6 +24,7 @@ from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
 from setupux.config_file import SetupConfigError, load_runtime_config_file
+from setupux.validate import discover_camera_indexes
 from zones import ZoneConfigError, load_zones, select_zones_for_profile
 
 
@@ -32,6 +33,7 @@ def parse_args() -> VisionOSConfig:
     parser = argparse.ArgumentParser(description="Run Vision OS on a webcam, video, or replay feed.")
     argv = sys.argv[1:]
     parser.add_argument("--config", help="Optional path to a saved Vision OS runtime config YAML file.")
+    parser.add_argument("--list-cameras", action="store_true", help="Probe a small camera index range and exit.")
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
@@ -86,6 +88,7 @@ def parse_args() -> VisionOSConfig:
 
     return VisionOSConfig(
         config_path=args.config if args.config else config_from_file.config_path,
+        list_cameras=args.list_cameras,
         camera_index=args.camera if "--camera" in argv else config_from_file.camera_index,
         model_name=args.model if "--model" in argv else config_from_file.model_name,
         confidence_threshold=args.conf if "--conf" in argv else config_from_file.confidence_threshold,
@@ -464,6 +467,13 @@ def main() -> int:
     """Run the end-to-end source loop until the user quits or the source is exhausted."""
     try:
         config = parse_args()
+        if config.list_cameras:
+            cameras = discover_camera_indexes()
+            if cameras:
+                print("Available cameras: " + ", ".join(str(index) for index in cameras))
+            else:
+                print("Available cameras: none detected")
+            return 0
         profile = _load_selected_profile(config)
         if profile is not None:
             config = _apply_profile_defaults(config, profile)
