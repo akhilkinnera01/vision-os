@@ -55,6 +55,7 @@ def test_demo_zone_config_exists_and_has_zones() -> None:
     assert zone_path.is_file()
     assert isinstance(payload, dict)
     assert len(payload["zones"]) >= 2
+    assert any(zone.get("profile") for zone in payload["zones"])
 
 
 def test_demo_trigger_config_exists_and_has_rules() -> None:

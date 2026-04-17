@@ -2,6 +2,7 @@ zones:
   - id: desk_a
     name: Desk A
     type: occupancy
+    profile: workstation
     polygon:
       - [40, 220]
       - [320, 220]
@@ -11,6 +12,7 @@ zones:
   - id: desk_b
     name: Desk B
     type: occupancy
+    profile: study_room
     polygon:
       - [360, 220]
       - [700, 220]
@@ -20,6 +22,7 @@ zones:
   - id: whiteboard
     name: Whiteboard
     type: activity
+    profile: meeting_room
     polygon:
       - [760, 80]
       - [1220, 80]
