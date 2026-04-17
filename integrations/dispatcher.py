@@ -41,7 +41,7 @@ class TriggerDispatcher:
                 )
                 continue
             if action.action_type == "file_append":
-                self._write_log(action.target or "", payload_bytes)
+                error = self._write_log(action.target or "", payload_bytes)
                 records.append(
                     TriggeredActionRecord(
                         trigger_id=rule.rule_id,
@@ -49,7 +49,8 @@ class TriggerDispatcher:
                         timestamp=timestamp,
                         target=action.target,
                         payload=payload,
-                        success=True,
+                        success=error is None,
+                        error=error,
                     )
                 )
                 continue
@@ -99,11 +100,16 @@ class TriggerDispatcher:
             raise ValueError(f"Unsupported trigger action type: {action.action_type}")
         return tuple(records)
 
-    def _write_log(self, path: str, payload: bytes) -> None:
+    def _write_log(self, path: str, payload: bytes) -> str | None:
         target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("ab") as handle:
-            handle.write(payload + b"\n")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("ab") as handle:
+                handle.write(payload + b"\n")
+            return None
+        except OSError as exc:
+            self._log_failure("file_append", path, exc)
+            return str(exc)
 
     def _post_webhook(self, url: str, method: str, payload: bytes) -> str | None:
         request = Request(url=url, data=payload, headers={"Content-Type": "application/json"}, method=method)
