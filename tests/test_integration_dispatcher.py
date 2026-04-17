@@ -92,6 +92,47 @@ def test_integration_dispatcher_uses_configured_webhook_method(monkeypatch) -> N
     assert captured_request.get_method() == "PATCH"
 
 
+def test_integration_dispatcher_logs_structured_payloads_to_logger() -> None:
+    captured = []
+
+    class _Logger:
+        def log(self, event: str, **kwargs) -> None:
+            captured.append((event, kwargs))
+
+    dispatcher = IntegrationDispatcher(logger=_Logger())
+    envelope = IntegrationEnvelope(
+        source="trigger",
+        timestamp=7.0,
+        source_mode="video",
+        scene_label="Focused Work",
+        confidence=0.96,
+        payload={"trigger_id": "focus-session"},
+    )
+    target = IntegrationTarget(
+        integration_id="trigger-log",
+        target_type="log",
+        source="trigger",
+        target="integration_dispatch",
+        trigger_ids=("focus-session",),
+    )
+
+    records = dispatcher.dispatch_many((target,), envelope)
+
+    assert len(records) == 1
+    assert records[0].target_type == "log"
+    assert records[0].success is True
+    assert captured == [
+        (
+            "integration_dispatch",
+            {
+                "integration_id": "trigger-log",
+                "source": "trigger",
+                "payload": envelope.to_dict(),
+            },
+        )
+    ]
+
+
 def test_integration_dispatcher_logs_mqtt_failures_without_raising(
     monkeypatch,
     capsys,
