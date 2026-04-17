@@ -122,61 +122,57 @@ def _validate_input_path(config: VisionOSConfig) -> None:
         raise FileNotFoundError(f"{source_name.capitalize()} input not found: {input_path}")
 
 
-def _process_packet(
-    packet: FramePacket,
-    detector: YOLODetector | None,
-    feature_builder: FeatureBuilder,
-    temporal_memory: TemporalMemory,
-    context_engine: ContextRulesEngine,
-    decision_engine: DecisionEngine,
-    explanation_engine: ExplanationEngine,
+def _log_run_started(config: VisionOSConfig, policy_name: str, logger: VisionLogger) -> None:
+    """Emit one structured record that captures the active runtime configuration."""
+    logger.log(
+        "run_started",
+        mode=config.source_mode.value,
+        policy=policy_name,
+        overlay_mode=config.overlay_mode.value,
+        headless=config.headless,
+        temporal_window_seconds=config.temporal_window_seconds,
+        record_path=config.record_path,
+        benchmark_output_path=config.benchmark_output_path,
+    )
+
+
+def _finalize_run(
+    config: VisionOSConfig,
     benchmark_tracker: BenchmarkTracker,
-    recorder: ReplayRecorder | None,
-) -> InferenceOutput:
-    """Run the full scene pipeline for one packet."""
-    start = time.perf_counter()
-    detections = packet.replay_detections if packet.replay_detections is not None else detector.detect(packet.frame) if detector else []
+    logger: VisionLogger,
+) -> int:
+    """Persist run artifacts, emit completion logs, and print the benchmark summary."""
+    if config.record_path and config.source_mode != SourceMode.REPLAY:
+        logger.log("artifact_written", kind="replay", path=config.record_path, mode=config.source_mode.value)
 
-    features = feature_builder.build(detections, packet.frame.shape[:2])
-    provisional_context = context_engine.infer(features)
-    temporal_state = temporal_memory.update(
-        packet.timestamp,
-        features,
-        provisional_context.label,
-        provisional_context.confidence,
-    )
-    scene_context = context_engine.infer(features, temporal_state)
-    decision = decision_engine.decide(scene_context, features, temporal_state)
-    inference_ms = (time.perf_counter() - start) * 1000.0
-    runtime_metrics = benchmark_tracker.record_inference(packet.timestamp, inference_ms, decision.label)
-    explanation = explanation_engine.explain(
-        decision,
-        scene_context,
-        features,
-        temporal_state,
-        runtime_metrics,
-    )
+    if config.benchmark_output_path:
+        benchmark_tracker.write_summary(config.benchmark_output_path)
+        logger.log("artifact_written", kind="benchmark", path=config.benchmark_output_path, mode=config.source_mode.value)
 
-    if recorder is not None:
-        recorder.write(
-            frame_index=packet.frame_index,
-            timestamp=packet.timestamp,
-            frame_shape=packet.frame.shape[:2],
-            detections=detections,
-        )
-
-    return InferenceOutput(
-        frame_index=packet.frame_index,
-        detections=detections,
-        decision=decision,
-        explanation=explanation,
-        runtime_metrics=runtime_metrics,
+    summary = benchmark_tracker.summary()
+    logger.log(
+        "run_completed",
+        mode=config.source_mode.value,
+        frames=summary.frames_processed,
+        fps=summary.fps,
+        average_inference_ms=summary.average_inference_ms,
+        dropped_frames=summary.dropped_frames,
+        decision_switch_rate=summary.decision_switch_rate,
+        scene_stability_score=summary.scene_stability_score,
     )
+    print(f"Benchmark summary: {summary.to_dict()}")
+    return 0
+
+
+def _should_use_streaming_runtime(config: VisionOSConfig) -> bool:
+    """Webcam mode stays on the real-time worker path even when rendering is disabled."""
+    return config.source_mode == SourceMode.WEBCAM
 
 
 def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
     if not source.is_opened():
+        logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path, camera=config.camera_index)
         print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
         source.close()
         return 1
@@ -219,7 +215,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameR
     worker = threading.Thread(target=inference_worker, name="vision-os-inference", daemon=True)
     worker.start()
     latest_output: InferenceOutput | None = None
-    rendered_frames = 0
+    processed_frames = 0
 
     try:
         while True:
@@ -236,21 +232,23 @@ def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameR
             except queue.Empty:
                 pass
 
-            annotated_frame = packet.frame
-            if latest_output is not None:
-                annotated_frame = renderer.render(
-                    packet.frame,
-                    latest_output.detections,
-                    latest_output.decision,
-                    latest_output.explanation,
-                    latest_output.runtime_metrics,
-                )
+            if not config.headless:
+                annotated_frame = packet.frame
+                if latest_output is not None:
+                    annotated_frame = renderer.render(
+                        packet.frame,
+                        latest_output.detections,
+                        latest_output.decision,
+                        latest_output.explanation,
+                        latest_output.runtime_metrics,
+                    )
 
-            cv2.imshow("Vision OS", annotated_frame)
-            rendered_frames += 1
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-            if config.max_frames is not None and rendered_frames >= config.max_frames:
+                cv2.imshow("Vision OS", annotated_frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+
+            processed_frames += 1
+            if config.max_frames is not None and processed_frames >= config.max_frames:
                 break
     finally:
         stop_event.set()
@@ -259,19 +257,16 @@ def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameR
         source.close()
         if recorder is not None:
             recorder.close()
-        cv2.destroyAllWindows()
+        if not config.headless:
+            cv2.destroyAllWindows()
 
-    if config.benchmark_output_path:
-        benchmark_tracker.write_summary(config.benchmark_output_path)
-    summary = benchmark_tracker.summary()
-    logger.log("run_completed", mode=config.source_mode.value, frames=summary.frames_processed, fps=summary.fps)
-    print(f"Benchmark summary: {summary.to_dict()}")
-    return 0
+    return _finalize_run(config, benchmark_tracker, logger)
 
 
 def _run_sequential_mode(config: VisionOSConfig, policy, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run video or replay modes deterministically without dropping frames."""
     if not source.is_opened():
+        logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path)
         print(f"Unable to open {config.source_mode.value} source.", file=sys.stderr)
         source.close()
         return 1
@@ -322,12 +317,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, source, renderer: Frame
         if not config.headless:
             cv2.destroyAllWindows()
 
-    if config.benchmark_output_path:
-        benchmark_tracker.write_summary(config.benchmark_output_path)
-    summary = benchmark_tracker.summary()
-    logger.log("run_completed", mode=config.source_mode.value, frames=summary.frames_processed, fps=summary.fps)
-    print(f"Benchmark summary: {summary.to_dict()}")
-    return 0
+    return _finalize_run(config, benchmark_tracker, logger)
 
 
 def main() -> int:
@@ -343,8 +333,8 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    logger.log("run_started", mode=config.source_mode.value, policy=policy.name)
-    if config.source_mode == SourceMode.WEBCAM and not config.headless:
+    _log_run_started(config, policy.name, logger)
+    if _should_use_streaming_runtime(config):
         return _run_streaming_mode(config, policy, source, renderer, logger)
     return _run_sequential_mode(config, policy, source, renderer, logger)
 
