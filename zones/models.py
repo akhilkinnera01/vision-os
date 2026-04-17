@@ -16,6 +16,16 @@ class ZoneType(StrEnum):
     TRANSITION = "transition"
 
 
+class ZoneContextLabel(StrEnum):
+    """Stable zone-local labels."""
+
+    EMPTY = "empty"
+    OCCUPIED = "occupied"
+    SOLO_FOCUS = "solo_focus"
+    GROUP_ACTIVITY = "group_activity"
+    CASUAL_OCCUPANCY = "casual_occupancy"
+
+
 @dataclass(slots=True, frozen=True)
 class ZonePoint:
     """One polygon vertex in image pixel space."""
@@ -75,3 +85,58 @@ class ZoneFeatureSet:
     detection_count: int = 0
     occupied: bool = False
     actor_track_ids: tuple[int, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneContext:
+    """High-level zone-local interpretation."""
+
+    label: ZoneContextLabel
+    confidence: float
+    signals: tuple[str, ...] = field(default_factory=tuple)
+    confidence_reason: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneDecision:
+    """Final zone-local action suggestion."""
+
+    label: ZoneContextLabel
+    confidence: float
+    action: str
+    reasoning_facts: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneTemporalSnapshot:
+    """One zone-local time sample within the rolling memory window."""
+
+    timestamp: float
+    label: ZoneContextLabel
+    occupied: bool
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneTemporalState:
+    """Aggregated temporal state for one zone."""
+
+    window_span_seconds: float = 0.0
+    dominant_label: ZoneContextLabel | None = None
+    current_label_duration_seconds: float = 0.0
+    occupied_duration_seconds: float = 0.0
+    label_switch_count: int = 0
+    stability_score: float = 0.0
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneRuntimeState:
+    """Current end-to-end zone-local runtime output."""
+
+    zone_id: str
+    zone_name: str
+    zone_type: ZoneType
+    feature_set: ZoneFeatureSet
+    context: ZoneContext
+    decision: ZoneDecision
+    temporal_state: ZoneTemporalState
