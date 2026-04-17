@@ -122,6 +122,16 @@ class TriggerEngine:
                     continue
                 return True, event
             return False, None
+        if condition.source.startswith("event.metadata."):
+            metadata_key = condition.source.removeprefix("event.metadata.")
+            for event in snapshot.events:
+                actual = event.metadata.get(metadata_key)
+                if not self._compare(actual, condition.operator, condition.value):
+                    continue
+                if any(event.metadata.get(key) != value for key, value in condition.event_metadata_filters.items()):
+                    continue
+                return True, event
+            return False, None
         raise ValueError(f"Unsupported trigger condition source: {condition.source}")
 
     def _compare(self, actual: object, operator: str, expected: object) -> bool:
