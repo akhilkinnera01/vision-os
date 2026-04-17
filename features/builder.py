@@ -81,16 +81,14 @@ class FeatureBuilder:
         distracted_person_count = 0
         max_person_dwell_seconds = 0.0
         if actor_frame_state is not None:
-            focused_person_count = sum(
-                1 for actor in actor_frame_state.actors.values() if actor.interaction_state == "laptop_engaged"
-            )
-            distracted_person_count = sum(
-                1 for actor in actor_frame_state.actors.values() if actor.interaction_state == "phone_engaged"
-            )
-            max_person_dwell_seconds = max(
-                (actor.dwell_seconds for actor in actor_frame_state.actors.values()),
-                default=0.0,
-            )
+            for actor in actor_frame_state.actors.values():
+                if actor.interaction_state == "laptop_engaged":
+                    focused_person_count += 1
+                elif actor.interaction_state == "phone_engaged":
+                    distracted_person_count += 1
+
+                if actor.dwell_seconds > max_person_dwell_seconds:
+                    max_person_dwell_seconds = actor.dwell_seconds
 
         return SceneFeatures(
             counts=dict(counts),
