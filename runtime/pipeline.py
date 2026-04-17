@@ -27,6 +27,15 @@ from state.actor_store import ActorStore
 from state.memory import TemporalMemory
 from telemetry.timers import StageTimer
 from tracking.tracker import DetectionTracker
+from zones import (
+    Zone,
+    ZoneAssigner,
+    ZoneDecisionEngine,
+    ZoneFeatureBuilder,
+    ZoneRulesEngine,
+    ZoneRuntimeState,
+    ZoneTemporalMemory,
+)
 
 
 @dataclass(slots=True)
@@ -40,6 +49,7 @@ class InferenceOutput:
     runtime_metrics: RuntimeMetrics
     events: list[VisionEvent]
     actor_frame_state: ActorFrameState
+    zone_states: tuple[ZoneRuntimeState, ...] = ()
 
 
 class VisionPipeline:
@@ -49,11 +59,13 @@ class VisionPipeline:
         self,
         config: VisionOSConfig,
         policy: VisionPolicy,
+        zones: tuple[Zone, ...] = (),
         detector: YOLODetector | None = None,
         benchmark_tracker: BenchmarkTracker | None = None,
     ) -> None:
         self.config = config
         self.policy = policy
+        self.zones = zones
         self.detector = detector if detector is not None else None if config.source_mode.value == "replay" else YOLODetector(config)
         self.tracker = DetectionTracker(policy.tracking)
         self.actor_store = ActorStore(policy)
@@ -64,6 +76,11 @@ class VisionPipeline:
         self.event_emitter = EventEmitter(policy.events)
         self.explanation_engine = ExplanationEngine()
         self.benchmark_tracker = benchmark_tracker or BenchmarkTracker()
+        self.zone_assigner = ZoneAssigner() if zones else None
+        self.zone_feature_builder = ZoneFeatureBuilder(self.feature_builder) if zones else None
+        self.zone_rules_engine = ZoneRulesEngine() if zones else None
+        self.zone_decision_engine = ZoneDecisionEngine() if zones else None
+        self.zone_temporal_memory = ZoneTemporalMemory(config.temporal_window_seconds) if zones else None
 
     def process(self, packet: FramePacket) -> InferenceOutput:
         timer = StageTimer()
@@ -84,6 +101,58 @@ class VisionPipeline:
 
         with timer.measure("feature"):
             features = self.feature_builder.build(detections, packet.frame.shape[:2], actor_frame_state)
+
+        zone_states: tuple[ZoneRuntimeState, ...] = ()
+        if self.zones and self.zone_assigner and self.zone_feature_builder and self.zone_rules_engine and self.zone_decision_engine and self.zone_temporal_memory:
+            with timer.measure("zone_assign"):
+                zone_assignments = self.zone_assigner.assign(detections, self.zones)
+
+            with timer.measure("zone_feature"):
+                zone_feature_sets = self.zone_feature_builder.build(
+                    self.zones,
+                    zone_assignments,
+                    packet.frame.shape[:2],
+                    actor_frame_state,
+                )
+
+            with timer.measure("zone_context"):
+                provisional_zone_contexts = {
+                    feature_set.zone_id: self.zone_rules_engine.infer(feature_set)
+                    for feature_set in zone_feature_sets
+                }
+
+            with timer.measure("zone_temporal"):
+                zone_temporal_states = self.zone_temporal_memory.update(
+                    packet.timestamp,
+                    zone_feature_sets,
+                    provisional_zone_contexts,
+                )
+
+            with timer.measure("zone_context_refine"):
+                zone_contexts = {
+                    feature_set.zone_id: self.zone_rules_engine.infer(
+                        feature_set,
+                        zone_temporal_states[feature_set.zone_id],
+                    )
+                    for feature_set in zone_feature_sets
+                }
+
+            with timer.measure("zone_decision"):
+                zone_states = tuple(
+                    ZoneRuntimeState(
+                        zone_id=feature_set.zone_id,
+                        zone_name=feature_set.zone_name,
+                        zone_type=feature_set.zone_type,
+                        feature_set=feature_set,
+                        context=zone_contexts[feature_set.zone_id],
+                        decision=self.zone_decision_engine.decide(
+                            zone_contexts[feature_set.zone_id],
+                            zone_temporal_states[feature_set.zone_id],
+                        ),
+                        temporal_state=zone_temporal_states[feature_set.zone_id],
+                    )
+                    for feature_set in zone_feature_sets
+                )
 
         with timer.measure("context"):
             provisional_context = self.context_engine.infer(features)
@@ -137,4 +206,5 @@ class VisionPipeline:
             runtime_metrics=runtime_metrics,
             events=events,
             actor_frame_state=actor_frame_state,
+            zone_states=zone_states,
         )

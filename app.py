@@ -177,7 +177,7 @@ def _should_use_streaming_runtime(config: VisionOSConfig) -> bool:
     return config.source_mode == SourceMode.WEBCAM
 
 
-def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_streaming_mode(config: VisionOSConfig, policy, zones, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path, camera=config.camera_index)
@@ -198,7 +198,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameR
     stop_event = threading.Event()
 
     def inference_worker() -> None:
-        pipeline = VisionPipeline(config, policy=policy, benchmark_tracker=benchmark_tracker)
+        pipeline = VisionPipeline(config, policy=policy, zones=tuple(zones), benchmark_tracker=benchmark_tracker)
         while not stop_event.is_set():
             try:
                 packet = frame_queue.get(timeout=0.1)
@@ -271,7 +271,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, source, renderer: FrameR
     return _finalize_run(config, benchmark_tracker, logger)
 
 
-def _run_sequential_mode(config: VisionOSConfig, policy, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_sequential_mode(config: VisionOSConfig, policy, zones, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run video or replay modes deterministically without dropping frames."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path)
@@ -285,7 +285,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, source, renderer: Frame
         if config.record_path and config.source_mode != SourceMode.REPLAY
         else None
     )
-    pipeline = VisionPipeline(config, policy=policy, benchmark_tracker=benchmark_tracker)
+    pipeline = VisionPipeline(config, policy=policy, zones=tuple(zones), benchmark_tracker=benchmark_tracker)
 
     processed_frames = 0
     try:
@@ -344,8 +344,8 @@ def main() -> int:
 
     _log_run_started(config, policy.name, len(zones), logger)
     if _should_use_streaming_runtime(config):
-        return _run_streaming_mode(config, policy, source, renderer, logger)
-    return _run_sequential_mode(config, policy, source, renderer, logger)
+        return _run_streaming_mode(config, policy, zones, source, renderer, logger)
+    return _run_sequential_mode(config, policy, zones, source, renderer, logger)
 
 
 if __name__ == "__main__":
