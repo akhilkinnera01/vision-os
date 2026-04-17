@@ -20,6 +20,7 @@ from runtime.benchmark import BenchmarkTracker
 from runtime.history import HistoryRecorder, SessionAnalyticsEngine
 from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
+from server import SessionController, WorkspaceManifest
 from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
@@ -233,6 +234,23 @@ def _validate_input_path(config: VisionOSConfig) -> None:
         integrations_path = Path(config.integrations_path)
         if not integrations_path.is_file():
             raise FileNotFoundError(f"Integration config not found: {integrations_path}")
+
+
+def _build_workspace_manifest(config: VisionOSConfig, *, profile_id: str | None) -> WorkspaceManifest:
+    """Build a product-facing workspace record from the current CLI config."""
+    workspace_key = profile_id or config.source_mode.value
+    source_ref = str(config.camera_index) if config.source_mode == SourceMode.WEBCAM else config.input_path
+    return WorkspaceManifest(
+        workspace_id=f"{workspace_key}-{config.source_mode.value}",
+        name=(profile_id or f"{config.source_mode.value.title()} Workspace").replace("_", " ").title(),
+        source_mode=config.source_mode.value,
+        profile_id=profile_id,
+        policy_name=config.policy_name,
+        source_ref=source_ref,
+        zones_path=config.zones_path,
+        triggers_path=config.trigger_path,
+        integrations_path=config.integrations_path,
+    )
 
 
 def _log_run_started(
@@ -635,29 +653,40 @@ def main() -> int:
         )
     )
     _log_run_started(config, policy.name, len(zones), logger, profile_id=None if profile is None else profile.profile_id)
-    if _should_use_streaming_runtime(config):
-        return _run_streaming_mode(
-            config,
-            policy,
-            zones,
-            trigger_config,
-            source,
-            renderer,
-            logger,
-            integration_config=integration_config,
-            profile_id=None if profile is None else profile.profile_id,
-        )
-    return _run_sequential_mode(
-        config,
-        policy,
-        zones,
-        trigger_config,
-        source,
-        renderer,
-        logger,
-        integration_config=integration_config,
-        profile_id=None if profile is None else profile.profile_id,
+    session_controller = SessionController()
+    session_controller.start_session(
+        _build_workspace_manifest(config, profile_id=None if profile is None else profile.profile_id)
     )
+    try:
+        if _should_use_streaming_runtime(config):
+            result = _run_streaming_mode(
+                config,
+                policy,
+                zones,
+                trigger_config,
+                source,
+                renderer,
+                logger,
+                integration_config=integration_config,
+                profile_id=None if profile is None else profile.profile_id,
+            )
+        else:
+            result = _run_sequential_mode(
+                config,
+                policy,
+                zones,
+                trigger_config,
+                source,
+                renderer,
+                logger,
+                integration_config=integration_config,
+                profile_id=None if profile is None else profile.profile_id,
+            )
+    finally:
+        final_state = "completed" if "result" in locals() and result == 0 else "failed"
+        session_controller.finish_session(final_state)
+
+    return result
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Browser-app backend primitives for the Vision OS local web app."""
 
+from server.controller import SessionController
 from server.models import (
     ArtifactIndex,
     SessionEvent,
@@ -12,6 +13,7 @@ from server.store import WorkspaceStore
 
 __all__ = [
     "ArtifactIndex",
+    "SessionController",
     "SessionEvent",
     "SessionRecord",
     "SessionSnapshot",
