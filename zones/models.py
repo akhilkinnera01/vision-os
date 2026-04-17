@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from common.models import Detection
+from common.models import Detection, SceneFeatures
 
 
 class ZoneType(StrEnum):
@@ -62,3 +62,16 @@ class ZoneAssignment:
     detection: Detection
     method: str
     score: float
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneFeatureSet:
+    """Zone-local feature bundle derived from assigned detections and actors."""
+
+    zone_id: str
+    zone_name: str
+    zone_type: ZoneType
+    features: SceneFeatures = field(default_factory=SceneFeatures)
+    detection_count: int = 0
+    occupied: bool = False
+    actor_track_ids: tuple[int, ...] = field(default_factory=tuple)
