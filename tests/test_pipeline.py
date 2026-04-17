@@ -315,6 +315,49 @@ def test_pipeline_builds_zone_runtime_states_for_replay_packets() -> None:
     assert zone_states["desk_b"].feature_set.features.person_count == 0
 
 
+def test_zone_runtime_states_stay_stable_across_replay_sequence() -> None:
+    zones = (
+        Zone(
+            zone_id="desk_a",
+            name="Desk A",
+            zone_type=ZoneType.OCCUPANCY,
+            polygon=(
+                ZonePoint(0.0, 0.0),
+                ZonePoint(420.0, 0.0),
+                ZonePoint(420.0, 420.0),
+                ZonePoint(0.0, 420.0),
+            ),
+        ),
+    )
+    pipeline = VisionPipeline(
+        VisionOSConfig(source_mode=SourceMode.REPLAY),
+        policy=load_policy("default"),
+        zones=zones,
+    )
+    detections = [
+        make_detection("person", (80, 80, 180, 320)),
+        make_detection("laptop", (120, 240, 260, 330)),
+    ]
+
+    last_output = None
+    for timestamp in (0.0, 4.0, 8.0):
+        packet = FramePacket(
+            frame_index=int(timestamp),
+            timestamp=timestamp,
+            frame=np.zeros((720, 1280, 3), dtype=np.uint8),
+            source_mode=SourceMode.REPLAY,
+            replay_detections=detections,
+        )
+        last_output = pipeline.process(packet)
+
+    assert last_output is not None
+    zone_state = last_output.zone_states[0]
+    assert zone_state.context.label.value == "solo_focus"
+    assert zone_state.temporal_state.current_label_duration_seconds == 8.0
+    assert zone_state.temporal_state.occupied_duration_seconds == 8.0
+    assert zone_state.temporal_state.stability_score >= 0.95
+
+
 def test_renderer_safe_shape_fixture() -> None:
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
     assert frame.shape == (720, 1280, 3)
