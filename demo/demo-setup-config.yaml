@@ -1,0 +1,5 @@
+source: replay
+input: demo-replay.jsonl
+profile_file: sample-profile.yaml
+overlay_mode: debug
+headless: true

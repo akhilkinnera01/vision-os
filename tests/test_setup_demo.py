@@ -83,3 +83,31 @@ def test_demo_mode_writes_history_and_summary_artifacts(monkeypatch, tmp_path: P
 
     benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
     assert benchmark["frames_processed"] == 5
+
+
+def test_config_driven_demo_run_uses_committed_setup_manifest(monkeypatch, tmp_path: Path) -> None:
+    benchmark_path = tmp_path / "benchmark.json"
+    history_path = tmp_path / "history.jsonl"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "app.py",
+            "--config",
+            str(DEMO_DIR / "demo-setup-config.yaml"),
+            "--max-frames",
+            "4",
+            "--benchmark-output",
+            str(benchmark_path),
+            "--history-output",
+            str(history_path),
+        ],
+    )
+
+    result = app.main()
+
+    assert result == 0
+    benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
+    assert benchmark["frames_processed"] == 4
+    assert len(history_path.read_text(encoding="utf-8").splitlines()) == 4

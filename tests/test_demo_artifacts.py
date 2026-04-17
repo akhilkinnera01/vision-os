@@ -10,6 +10,7 @@ import yaml
 
 from common.profile import load_profile
 from integrations import load_trigger_config
+from setupux import load_runtime_config_file
 from zones import load_zones, select_zones_for_profile
 
 
@@ -110,3 +111,13 @@ def test_demo_profile_manifest_exists_and_resolves_assets() -> None:
     assert profile.zones_path == str(DEMO_DIR / "sample-zones.yaml")
     assert profile.trigger_path == str(DEMO_DIR / "sample-triggers.yaml")
     assert len(scoped_zones) >= 1
+
+
+def test_demo_setup_config_exists_and_resolves_relative_assets() -> None:
+    config_path = DEMO_DIR / "demo-setup-config.yaml"
+    config = load_runtime_config_file(str(config_path))
+
+    assert config_path.is_file()
+    assert config.source_mode.value == "replay"
+    assert config.input_path == str(DEMO_DIR / "demo-replay.jsonl")
+    assert config.profile_path == str(DEMO_DIR / "sample-profile.yaml")
