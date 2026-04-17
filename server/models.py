@@ -41,8 +41,11 @@ class WorkspaceManifest:
     workspace_id: str
     name: str
     source_mode: str
+    config_path: str | None = None
     profile_id: str | None = None
+    profile_path: str | None = None
     policy_name: str | None = None
+    policy_path: str | None = None
     source_ref: str | None = None
     zones_path: str | None = None
     triggers_path: str | None = None
@@ -54,8 +57,11 @@ class WorkspaceManifest:
             "workspace_id": self.workspace_id,
             "name": self.name,
             "source_mode": self.source_mode,
+            "config_path": self.config_path,
             "profile_id": self.profile_id,
+            "profile_path": self.profile_path,
             "policy_name": self.policy_name,
+            "policy_path": self.policy_path,
             "source_ref": self.source_ref,
             "zones_path": self.zones_path,
             "triggers_path": self.triggers_path,
@@ -69,8 +75,11 @@ class WorkspaceManifest:
             workspace_id=str(payload["workspace_id"]),
             name=str(payload["name"]),
             source_mode=str(payload["source_mode"]),
+            config_path=_optional_str(payload.get("config_path")),
             profile_id=_optional_str(payload.get("profile_id")),
+            profile_path=_optional_str(payload.get("profile_path")),
             policy_name=_optional_str(payload.get("policy_name")),
+            policy_path=_optional_str(payload.get("policy_path")),
             source_ref=_optional_str(payload.get("source_ref")),
             zones_path=_optional_str(payload.get("zones_path")),
             triggers_path=_optional_str(payload.get("triggers_path")),

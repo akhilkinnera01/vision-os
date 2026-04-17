@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 from server.launchpad import LaunchpadService
 from server.models import SessionRecord, SessionSnapshot, ValidationRecord, WorkspaceManifest
@@ -178,12 +179,66 @@ def test_launchpad_app_returns_preview_bytes_for_active_workspace(tmp_path: Path
     assert body == b"jpeg-payload"
 
 
-def _call_app(app: LaunchpadApp, path: str) -> tuple[str, list[tuple[str, str]], str]:
-    status, headers, body = _call_app_raw(app, path)
+def test_launchpad_app_starts_a_workspace_through_the_runtime_host(tmp_path: Path) -> None:
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    calls = []
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="webcam",
+        )
+    )
+    service = LaunchpadService(
+        workspace_store,
+        session_store,
+        validation_store,
+        runtime_host=SimpleNamespace(
+            is_running=False,
+            active_workspace_id=None,
+            start=lambda *, workspace: calls.append(workspace.workspace_id) or setattr(service.runtime_host, "active_workspace_id", workspace.workspace_id),
+            stop=lambda: None,
+        ),
+    )
+    app = LaunchpadApp(service)
+
+    status, headers, body = _call_app(app, "/api/workspaces/desk-a/start", method="POST")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert calls == ["desk-a"]
+    assert '"started": true' in body
+
+
+def test_launchpad_app_stops_the_active_runtime_workspace(tmp_path: Path) -> None:
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    captured = {"stopped": False}
+    runtime_host = SimpleNamespace(
+        is_running=True,
+        active_workspace_id="desk-a",
+        start=lambda *, workspace: None,
+        stop=lambda: captured.update({"stopped": True}) or setattr(runtime_host, "active_workspace_id", None),
+    )
+    app = LaunchpadApp(LaunchpadService(workspace_store, session_store, validation_store, runtime_host=runtime_host))
+
+    status, headers, body = _call_app(app, "/api/runtime/stop", method="POST")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert captured["stopped"] is True
+    assert '"stopped": true' in body
+
+
+def _call_app(app: LaunchpadApp, path: str, *, method: str = "GET") -> tuple[str, list[tuple[str, str]], str]:
+    status, headers, body = _call_app_raw(app, path, method=method)
     return status, headers, body.decode("utf-8")
 
 
-def _call_app_raw(app: LaunchpadApp, path: str) -> tuple[str, list[tuple[str, str]], bytes]:
+def _call_app_raw(app: LaunchpadApp, path: str, *, method: str = "GET") -> tuple[str, list[tuple[str, str]], bytes]:
     captured: dict[str, object] = {}
 
     def start_response(status: str, headers: list[tuple[str, str]]) -> None:
@@ -191,7 +246,7 @@ def _call_app_raw(app: LaunchpadApp, path: str) -> tuple[str, list[tuple[str, st
         captured["headers"] = headers
 
     environ = {
-        "REQUEST_METHOD": "GET",
+        "REQUEST_METHOD": method,
         "PATH_INFO": path,
         "QUERY_STRING": "",
         "SERVER_NAME": "127.0.0.1",

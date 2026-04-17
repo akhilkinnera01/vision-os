@@ -20,19 +20,35 @@ class LaunchpadApp:
         self.live_state_store = live_state_store
 
     def __call__(self, environ, start_response):
+        method = environ.get("REQUEST_METHOD", "GET").upper()
         path = environ.get("PATH_INFO", "/")
-        if path == "/":
+        if path == "/" and method == "GET":
             return self._html_response(start_response, _render_launchpad(self.service.build_snapshot()))
-        if path == "/api/launchpad":
+        if path == "/api/launchpad" and method == "GET":
             payload = json.dumps(self.service.build_snapshot(), indent=2)
             return self._json_response(start_response, payload)
-        if path.startswith("/api/workspaces/") and path.endswith("/live"):
+        if path.startswith("/api/workspaces/") and path.endswith("/live") and method == "GET":
             workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/live").rstrip("/"))
             return self._json_response(start_response, json.dumps(self._live_snapshot(workspace_id), indent=2))
-        if path.startswith("/api/workspaces/") and path.endswith("/preview"):
+        if path.startswith("/api/workspaces/") and path.endswith("/preview") and method == "GET":
             workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/preview").rstrip("/"))
             return self._preview_response(start_response, workspace_id)
-        if path.startswith("/workspaces/"):
+        if path.startswith("/api/workspaces/") and path.endswith("/start") and method == "POST":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/start").rstrip("/"))
+            try:
+                payload = self.service.start_workspace(workspace_id)
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except RuntimeError as exc:
+                return self._json_error(start_response, "409 Conflict", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path == "/api/runtime/stop" and method == "POST":
+            try:
+                payload = self.service.stop_workspace()
+            except RuntimeError as exc:
+                return self._json_error(start_response, "409 Conflict", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/workspaces/") and method == "GET":
             workspace_id = unquote(path.removeprefix("/workspaces/"))
             workspace_surface = self.service.build_workspace_surface(workspace_id)
             if workspace_surface is None:
@@ -49,6 +65,14 @@ class LaunchpadApp:
         body = payload.encode("utf-8")
         start_response(
             "200 OK",
+            [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(body)))],
+        )
+        return [body]
+
+    def _json_error(self, start_response, status: str, message: str):
+        body = json.dumps({"error": message}, indent=2).encode("utf-8")
+        start_response(
+            status,
             [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(body)))],
         )
         return [body]
@@ -247,6 +271,10 @@ def _render_workspace(surface: dict[str, object]) -> str:
         <article class="card workspace-events">
           <p class="card-kicker">Recent activity</p>
           <h2>Events and warnings</h2>
+          <div class="workspace-controls">
+            <button id="start-workspace" type="button">Start</button>
+            <button id="stop-workspace" type="button" class="secondary-button">Stop</button>
+          </div>
           <ul id="live-events" class="tab-list">
             <li>No live session yet.</li>
           </ul>
@@ -260,6 +288,18 @@ def _render_workspace(surface: dict[str, object]) -> str:
         const events = document.getElementById("live-events");
         const preview = document.getElementById("live-preview");
         const previewCaption = document.getElementById("preview-caption");
+        const startButton = document.getElementById("start-workspace");
+        const stopButton = document.getElementById("stop-workspace");
+
+        async function sendControl(path) {{
+          const response = await fetch(path, {{ method: "POST" }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            events.innerHTML = `<li>${{payload.error || "Control request failed."}}</li>`;
+            return;
+          }}
+          await refreshWorkspace();
+        }}
 
         async function refreshWorkspace() {{
           const response = await fetch(`/api/workspaces/${{workspaceId}}/live`, {{ cache: "no-store" }});
@@ -270,6 +310,8 @@ def _render_workspace(surface: dict[str, object]) -> str:
             metrics.textContent = "No active metrics yet.";
             events.innerHTML = "<li>No live session yet.</li>";
             previewCaption.textContent = "Open a live run for this space to populate the browser preview.";
+            startButton.disabled = false;
+            stopButton.disabled = true;
             return;
           }}
 
@@ -289,8 +331,12 @@ def _render_workspace(surface: dict[str, object]) -> str:
             : "<li>No recent events or warnings.</li>";
           preview.src = `/api/workspaces/${{workspaceId}}/preview?ts=${{Date.now()}}`;
           previewCaption.textContent = "Live preview updates automatically while the session is running.";
+          startButton.disabled = true;
+          stopButton.disabled = false;
         }}
 
+        startButton.addEventListener("click", () => sendControl(`/api/workspaces/${{workspaceId}}/start`));
+        stopButton.addEventListener("click", () => sendControl("/api/runtime/stop"));
         refreshWorkspace();
         window.setInterval(refreshWorkspace, 1500);
       </script>
@@ -475,6 +521,32 @@ def _base_document(title: str, content: str) -> str:
         border-radius: 18px;
         background: rgba(18, 32, 51, 0.08);
         border: 1px solid var(--line);
+      }}
+
+      .workspace-controls {{
+        display: flex;
+        gap: 0.75rem;
+        margin: 0.25rem 0 1rem;
+      }}
+
+      button {{
+        border: 0;
+        border-radius: 999px;
+        padding: 0.8rem 1rem;
+        background: var(--accent);
+        color: #fff9f4;
+        font-weight: 600;
+        cursor: pointer;
+      }}
+
+      button.secondary-button {{
+        background: rgba(18, 32, 51, 0.14);
+        color: var(--ink);
+      }}
+
+      button:disabled {{
+        cursor: not-allowed;
+        opacity: 0.55;
       }}
 
       .tab-list {{

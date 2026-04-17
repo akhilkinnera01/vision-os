@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from server.runtime_host import RuntimeHost
 from server.store import SessionStore, ValidationStore, WorkspaceStore
 
 
@@ -46,10 +47,12 @@ class LaunchpadService:
         workspace_store: WorkspaceStore,
         session_store: SessionStore,
         validation_store: ValidationStore,
+        runtime_host: RuntimeHost | None = None,
     ) -> None:
         self.workspace_store = workspace_store
         self.session_store = session_store
         self.validation_store = validation_store
+        self.runtime_host = runtime_host
 
     def build_snapshot(self) -> dict[str, object]:
         workspaces = self.workspace_store.list_workspaces()
@@ -71,6 +74,7 @@ class LaunchpadService:
                     "validation_state": "unknown" if validation is None else validation.status,
                     "validation_summary": None if validation is None else validation.summary,
                     "last_run_state": "never_run" if latest_session is None else latest_session.state,
+                    "is_active": self.runtime_host is not None and self.runtime_host.active_workspace_id == workspace.workspace_id,
                     "href": f"/workspaces/{workspace.workspace_id}",
                 }
             )
@@ -114,5 +118,32 @@ class LaunchpadService:
                 "validation_summary": None if validation is None else validation.summary,
                 "last_run_state": "never_run" if latest_session is None else latest_session.state,
             },
+            "runtime": {
+                "is_running": self.runtime_host is not None and self.runtime_host.is_running,
+                "active_workspace_id": None if self.runtime_host is None else self.runtime_host.active_workspace_id,
+            },
             "tabs": list(WORKSPACE_TABS),
+        }
+
+    def start_workspace(self, workspace_id: str) -> dict[str, object]:
+        if self.runtime_host is None:
+            raise RuntimeError("Runtime host is not available for browser-driven runs.")
+        workspace = self.workspace_store.get_workspace(workspace_id)
+        if workspace is None:
+            raise KeyError(workspace_id)
+        self.runtime_host.start(workspace=workspace)
+        return {
+            "started": True,
+            "workspace_id": workspace_id,
+            "active_workspace_id": self.runtime_host.active_workspace_id,
+        }
+
+    def stop_workspace(self) -> dict[str, object]:
+        if self.runtime_host is None:
+            raise RuntimeError("Runtime host is not available for browser-driven runs.")
+        active_workspace_id = self.runtime_host.active_workspace_id
+        self.runtime_host.stop()
+        return {
+            "stopped": True,
+            "workspace_id": active_workspace_id,
         }

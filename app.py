@@ -22,6 +22,7 @@ from runtime.history import HistoryRecorder, SessionAnalyticsEngine
 from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
 from server import (
+    ArtifactIndex,
     LiveStateStore,
     SessionController,
     SessionSnapshot,
@@ -30,6 +31,7 @@ from server import (
     ValidationStore,
     WorkspaceManifest,
     WorkspaceStore,
+    RuntimeHost,
 )
 from server.launchpad import LaunchpadService
 from server.web import LaunchpadApp, serve_launchpad
@@ -264,12 +266,21 @@ def _build_workspace_manifest(config: VisionOSConfig, *, profile_id: str | None)
         workspace_id=f"{workspace_key}-{config.source_mode.value}",
         name=(profile_id or f"{config.source_mode.value.title()} Workspace").replace("_", " ").title(),
         source_mode=config.source_mode.value,
+        config_path=config.config_path,
         profile_id=profile_id,
+        profile_path=config.profile_path,
         policy_name=config.policy_name,
+        policy_path=config.policy_path,
         source_ref=source_ref,
         zones_path=config.zones_path,
         triggers_path=config.trigger_path,
         integrations_path=config.integrations_path,
+        outputs=ArtifactIndex(
+            replay_path=config.record_path,
+            history_path=config.history_output_path,
+            benchmark_path=config.benchmark_output_path,
+            session_summary_path=config.session_summary_output_path,
+        ),
     )
 
 
@@ -302,12 +313,13 @@ def _live_state_store(state_dir: Path | None = None) -> LiveStateStore:
     return LiveStateStore(base_dir / "live")
 
 
-def _build_launchpad_service(state_dir: Path | None = None) -> LaunchpadService:
+def _build_launchpad_service(state_dir: Path | None = None, runtime_host: RuntimeHost | None = None) -> LaunchpadService:
     """Assemble the local browser app service from the default state stores."""
     return LaunchpadService(
         _workspace_store(state_dir),
         _session_store(state_dir),
         _validation_store(state_dir),
+        runtime_host=runtime_host,
     )
 
 
@@ -358,7 +370,11 @@ def _write_live_session_state(
 
 def run_local_app(config: VisionOSConfig) -> int:
     """Run the local browser app shell until the operator stops it."""
-    app = LaunchpadApp(_build_launchpad_service(), live_state_store=_live_state_store())
+    runtime_host = RuntimeHost(app_path=Path(__file__).resolve())
+    app = LaunchpadApp(
+        _build_launchpad_service(runtime_host=runtime_host),
+        live_state_store=_live_state_store(),
+    )
     return serve_launchpad(app, host=config.app_host, port=config.app_port, open_browser=config.open_browser)
 
 
