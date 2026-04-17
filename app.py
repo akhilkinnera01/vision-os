@@ -1,4 +1,4 @@
-"""Entry point for the Vision OS real-time webcam pipeline."""
+"""Entry point for the Vision OS webcam, video, and replay runtime."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from common.models import OverlayMode, SourceMode
 from common.policy import PolicyValidationError, load_policy
 from runtime.benchmark import BenchmarkTracker
 from runtime.pipeline import InferenceOutput, VisionPipeline
-from runtime.io import FramePacket, ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
+from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
 from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
