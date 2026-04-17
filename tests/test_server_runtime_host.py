@@ -88,6 +88,39 @@ def test_runtime_host_starts_a_subprocess_for_a_workspace(monkeypatch) -> None:
     ]
 
 
+def test_runtime_host_can_generate_a_recording_path_for_browser_record_runs(monkeypatch) -> None:
+    captured = {}
+    fake_process = _FakeProcess()
+
+    monkeypatch.setattr(
+        "server.runtime_host.subprocess.Popen",
+        lambda command, cwd=None: captured.update({"command": command, "cwd": cwd}) or fake_process,
+    )
+    host = RuntimeHost(app_path=Path("/repo/vision-os/app.py"), python_executable="python-test")
+    workspace = WorkspaceManifest(
+        workspace_id="desk-a",
+        name="Desk A",
+        source_mode="video",
+        source_ref="demo/sample.mp4",
+    )
+
+    record_path = host.start(workspace=workspace, record_replay=True)
+
+    assert record_path == "/repo/vision-os/.visionos/artifacts/desk-a-recording-1.jsonl"
+    assert host.active_record_path == record_path
+    assert captured["command"] == [
+        "python-test",
+        "/repo/vision-os/app.py",
+        "--headless",
+        "--source",
+        "video",
+        "--input",
+        "demo/sample.mp4",
+        "--record",
+        "/repo/vision-os/.visionos/artifacts/desk-a-recording-1.jsonl",
+    ]
+
+
 def test_runtime_host_uses_saved_config_when_available(monkeypatch) -> None:
     captured = {}
     fake_process = _FakeProcess()
@@ -114,6 +147,53 @@ def test_runtime_host_uses_saved_config_when_available(monkeypatch) -> None:
     ]
 
 
+def test_runtime_host_can_override_recording_path_for_saved_config_runs(monkeypatch) -> None:
+    captured = {}
+    fake_process = _FakeProcess()
+    monkeypatch.setattr(
+        "server.runtime_host.subprocess.Popen",
+        lambda command, cwd=None: captured.update({"command": command, "cwd": cwd}) or fake_process,
+    )
+    host = RuntimeHost(app_path=Path("/repo/vision-os/app.py"), python_executable="python-test")
+    workspace = WorkspaceManifest(
+        workspace_id="desk-a",
+        name="Desk A",
+        source_mode="webcam",
+        config_path="visionos.config.yaml",
+    )
+
+    record_path = host.start(workspace=workspace, record_replay=True)
+
+    assert record_path == "/repo/vision-os/.visionos/artifacts/desk-a-recording-1.jsonl"
+    assert captured["command"] == [
+        "python-test",
+        "/repo/vision-os/app.py",
+        "--headless",
+        "--config",
+        "visionos.config.yaml",
+        "--record",
+        "/repo/vision-os/.visionos/artifacts/desk-a-recording-1.jsonl",
+    ]
+
+
+def test_runtime_host_rejects_record_requests_for_replay_sources(monkeypatch) -> None:
+    monkeypatch.setattr("server.runtime_host.subprocess.Popen", lambda *args, **kwargs: _FakeProcess())
+    host = RuntimeHost(app_path=Path("/repo/vision-os/app.py"), python_executable="python-test")
+    workspace = WorkspaceManifest(
+        workspace_id="replay-a",
+        name="Replay A",
+        source_mode="replay",
+        source_ref="demo/demo-replay.jsonl",
+    )
+
+    try:
+        host.start(workspace=workspace, record_replay=True)
+    except RuntimeError as exc:
+        assert "Replay sources" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected replay recording guard")
+
+
 def test_runtime_host_stops_and_clears_the_active_workspace(monkeypatch) -> None:
     fake_process = _FakeProcess()
     monkeypatch.setattr("server.runtime_host.subprocess.Popen", lambda *args, **kwargs: fake_process)
@@ -127,3 +207,4 @@ def test_runtime_host_stops_and_clears_the_active_workspace(monkeypatch) -> None
     assert fake_process.wait_calls == [2.0]
     assert host.is_running is False
     assert host.active_workspace_id is None
+    assert host.active_record_path is None

@@ -18,6 +18,8 @@ class RuntimeHost:
     python_executable: str = sys.executable
     _process: subprocess.Popen | None = None
     _active_workspace_id: str | None = None
+    _active_record_path: str | None = None
+    _launch_counter: int = 0
 
     @property
     def is_running(self) -> bool:
@@ -29,17 +31,28 @@ class RuntimeHost:
             return None
         return self._active_workspace_id
 
-    def start(self, *, workspace: WorkspaceManifest) -> None:
+    @property
+    def active_record_path(self) -> str | None:
+        if not self.is_running:
+            return None
+        return self._active_record_path
+
+    def start(self, *, workspace: WorkspaceManifest, record_replay: bool = False) -> str | None:
         if self.is_running:
             raise RuntimeError("Cannot start a new session while another active session is running.")
+        if record_replay and workspace.source_mode == "replay":
+            raise RuntimeError("Replay sources already have recorded input; browser recording is only available for live or video runs.")
 
-        command = self._build_command(workspace)
+        command, record_path = self._build_command(workspace, record_replay=record_replay)
         self._process = subprocess.Popen(command, cwd=str(self.app_path.parent))
         self._active_workspace_id = workspace.workspace_id
+        self._active_record_path = record_path
+        return record_path
 
     def stop(self) -> None:
         if self._process is None:
             self._active_workspace_id = None
+            self._active_record_path = None
             return
 
         if self._process.poll() is None:
@@ -47,12 +60,16 @@ class RuntimeHost:
             self._process.wait(timeout=2.0)
         self._process = None
         self._active_workspace_id = None
+        self._active_record_path = None
 
-    def _build_command(self, workspace: WorkspaceManifest) -> list[str]:
+    def _build_command(self, workspace: WorkspaceManifest, *, record_replay: bool = False) -> tuple[list[str], str | None]:
         command = [self.python_executable, str(self.app_path), "--headless"]
+        record_path = self._resolve_record_path(workspace, record_replay=record_replay)
         if workspace.config_path:
             command.extend(["--config", workspace.config_path])
-            return command
+            if record_path is not None:
+                command.extend(["--record", record_path])
+            return command, record_path
 
         command.extend(["--source", workspace.source_mode])
         if workspace.source_mode == "webcam":
@@ -74,12 +91,20 @@ class RuntimeHost:
             command.extend(["--trigger-file", workspace.triggers_path])
         if workspace.integrations_path:
             command.extend(["--integrations-file", workspace.integrations_path])
-        if workspace.outputs.replay_path:
-            command.extend(["--record", workspace.outputs.replay_path])
+        if record_path is not None:
+            command.extend(["--record", record_path])
         if workspace.outputs.history_path:
             command.extend(["--history-output", workspace.outputs.history_path])
         if workspace.outputs.benchmark_path:
             command.extend(["--benchmark-output", workspace.outputs.benchmark_path])
         if workspace.outputs.session_summary_path:
             command.extend(["--session-summary-output", workspace.outputs.session_summary_path])
-        return command
+        return command, record_path
+
+    def _resolve_record_path(self, workspace: WorkspaceManifest, *, record_replay: bool) -> str | None:
+        if not record_replay:
+            return workspace.outputs.replay_path
+        if workspace.outputs.replay_path is not None:
+            return workspace.outputs.replay_path
+        self._launch_counter += 1
+        return str(self.app_path.parent / ".visionos" / "artifacts" / f"{workspace.workspace_id}-recording-{self._launch_counter}.jsonl")

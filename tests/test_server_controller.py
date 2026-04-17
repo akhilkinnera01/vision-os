@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from server.models import ArtifactIndex
 from server.controller import SessionController
 from server.models import WorkspaceManifest
 
@@ -36,3 +37,21 @@ def test_session_controller_finishes_the_active_session() -> None:
     assert completed.state == "completed"
     assert completed.ended_at is not None
     assert controller.active_session is None
+
+
+def test_session_controller_carries_workspace_artifacts_into_session_state() -> None:
+    controller = SessionController()
+    desk = WorkspaceManifest(
+        workspace_id="desk-a",
+        name="Desk A",
+        source_mode="video",
+        outputs=ArtifactIndex(
+            replay_path=".visionos/artifacts/desk-a-recording-1.jsonl",
+            history_path="out/history.jsonl",
+        ),
+    )
+
+    running = controller.start_session(desk)
+
+    assert running.artifacts.replay_path == ".visionos/artifacts/desk-a-recording-1.jsonl"
+    assert running.artifacts.history_path == "out/history.jsonl"

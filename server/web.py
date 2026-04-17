@@ -42,6 +42,15 @@ class LaunchpadApp:
             except RuntimeError as exc:
                 return self._json_error(start_response, "409 Conflict", str(exc))
             return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/start-recording") and method == "POST":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/start-recording").rstrip("/"))
+            try:
+                payload = self.service.start_workspace_with_recording(workspace_id)
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except RuntimeError as exc:
+                return self._json_error(start_response, "409 Conflict", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
         if path.startswith("/api/workspaces/") and path.endswith("/validate") and method == "POST":
             workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/validate").rstrip("/"))
             try:
@@ -282,6 +291,7 @@ def _render_workspace(surface: dict[str, object]) -> str:
           <h2>Events and warnings</h2>
           <div class="workspace-controls">
             <button id="start-workspace" type="button">Start</button>
+            <button id="record-workspace" type="button" class="secondary-button">Start + Record</button>
             <button id="validate-workspace" type="button" class="secondary-button">Validate</button>
             <button id="stop-workspace" type="button" class="secondary-button">Stop</button>
           </div>
@@ -299,8 +309,10 @@ def _render_workspace(surface: dict[str, object]) -> str:
         const preview = document.getElementById("live-preview");
         const previewCaption = document.getElementById("preview-caption");
         const startButton = document.getElementById("start-workspace");
+        const recordButton = document.getElementById("record-workspace");
         const validateButton = document.getElementById("validate-workspace");
         const stopButton = document.getElementById("stop-workspace");
+        const canRecord = {json.dumps(workspace["source_mode"] != "replay")};
 
         async function sendControl(path) {{
           const response = await fetch(path, {{ method: "POST" }});
@@ -338,6 +350,7 @@ def _render_workspace(surface: dict[str, object]) -> str:
             events.innerHTML = "<li>No live session yet.</li>";
             previewCaption.textContent = "Open a live run for this space to populate the browser preview.";
             startButton.disabled = false;
+            recordButton.disabled = !canRecord;
             stopButton.disabled = true;
             return;
           }}
@@ -359,10 +372,12 @@ def _render_workspace(surface: dict[str, object]) -> str:
           preview.src = `/api/workspaces/${{workspaceId}}/preview?ts=${{Date.now()}}`;
           previewCaption.textContent = "Live preview updates automatically while the session is running.";
           startButton.disabled = true;
+          recordButton.disabled = true;
           stopButton.disabled = false;
         }}
 
         startButton.addEventListener("click", () => sendControl(`/api/workspaces/${{workspaceId}}/start`));
+        recordButton.addEventListener("click", () => sendControl(`/api/workspaces/${{workspaceId}}/start-recording`));
         validateButton.addEventListener("click", validateWorkspace);
         stopButton.addEventListener("click", () => sendControl("/api/runtime/stop"));
         refreshWorkspace();

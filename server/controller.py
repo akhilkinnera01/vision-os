@@ -29,6 +29,7 @@ class SessionController:
             workspace_id=workspace.workspace_id,
             state="running",
             started_at=time.time(),
+            artifacts=workspace.outputs,
         )
         return self._active_session
 

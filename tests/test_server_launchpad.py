@@ -110,6 +110,7 @@ def test_launchpad_app_renders_workspace_shell_page(tmp_path: Path) -> None:
     assert "Live" in body
     assert "Integrations" in body
     assert "Validate" in body
+    assert "Start + Record" in body
 
 
 def test_launchpad_app_returns_live_workspace_snapshot(tmp_path: Path) -> None:
@@ -199,7 +200,7 @@ def test_launchpad_app_starts_a_workspace_through_the_runtime_host(tmp_path: Pat
         runtime_host=SimpleNamespace(
             is_running=False,
             active_workspace_id=None,
-            start=lambda *, workspace: calls.append(workspace.workspace_id) or setattr(service.runtime_host, "active_workspace_id", workspace.workspace_id),
+            start=lambda *, workspace, record_replay=False: calls.append((workspace.workspace_id, record_replay)) or setattr(service.runtime_host, "active_workspace_id", workspace.workspace_id),
             stop=lambda: None,
         ),
     )
@@ -209,7 +210,7 @@ def test_launchpad_app_starts_a_workspace_through_the_runtime_host(tmp_path: Pat
 
     assert status == "200 OK"
     assert ("Content-Type", "application/json; charset=utf-8") in headers
-    assert calls == ["desk-a"]
+    assert calls == [("desk-a", False)]
     assert '"started": true' in body
 
 
@@ -232,6 +233,45 @@ def test_launchpad_app_stops_the_active_runtime_workspace(tmp_path: Path) -> Non
     assert ("Content-Type", "application/json; charset=utf-8") in headers
     assert captured["stopped"] is True
     assert '"stopped": true' in body
+
+
+def test_launchpad_app_starts_a_workspace_with_recording(tmp_path: Path) -> None:
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    captured = {}
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+        )
+    )
+    service = LaunchpadService(
+        workspace_store,
+        session_store,
+        validation_store,
+        runtime_host=SimpleNamespace(
+            is_running=False,
+            active_workspace_id=None,
+            active_record_path=None,
+            start=lambda *, workspace, record_replay=False: captured.update(
+                {"workspace_id": workspace.workspace_id, "record_replay": record_replay}
+            ) or setattr(service.runtime_host, "active_workspace_id", workspace.workspace_id) or setattr(
+                service.runtime_host, "active_record_path", ".visionos/artifacts/desk-a-recording-1.jsonl"
+            ) or ".visionos/artifacts/desk-a-recording-1.jsonl",
+            stop=lambda: None,
+        ),
+    )
+    app = LaunchpadApp(service)
+
+    status, headers, body = _call_app(app, "/api/workspaces/desk-a/start-recording", method="POST")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert captured == {"workspace_id": "desk-a", "record_replay": True}
+    assert '"record_path": ".visionos/artifacts/desk-a-recording-1.jsonl"' in body
 
 
 def test_launchpad_app_validates_a_workspace_through_the_service(tmp_path: Path) -> None:

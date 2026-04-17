@@ -131,16 +131,23 @@ class LaunchpadService:
         }
 
     def start_workspace(self, workspace_id: str) -> dict[str, object]:
+        return self._start_workspace(workspace_id, record_replay=False)
+
+    def start_workspace_with_recording(self, workspace_id: str) -> dict[str, object]:
+        return self._start_workspace(workspace_id, record_replay=True)
+
+    def _start_workspace(self, workspace_id: str, *, record_replay: bool) -> dict[str, object]:
         if self.runtime_host is None:
             raise RuntimeError("Runtime host is not available for browser-driven runs.")
         workspace = self.workspace_store.get_workspace(workspace_id)
         if workspace is None:
             raise KeyError(workspace_id)
-        self.runtime_host.start(workspace=workspace)
+        record_path = self.runtime_host.start(workspace=workspace, record_replay=record_replay)
         return {
             "started": True,
             "workspace_id": workspace_id,
             "active_workspace_id": self.runtime_host.active_workspace_id,
+            "record_path": record_path,
         }
 
     def stop_workspace(self) -> dict[str, object]:
