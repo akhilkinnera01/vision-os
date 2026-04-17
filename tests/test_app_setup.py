@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import app
+from common.models import ContextLabel
 from common.config import VisionOSConfig
 from common.models import SourceMode
 
@@ -38,3 +39,33 @@ def test_main_prints_startup_summary_before_running(monkeypatch, capsys) -> None
     assert "Source: video(demo/sample.mp4)" in captured.out
     assert "Zones: 0 loaded" in captured.out
     assert "Triggers: 0 enabled" in captured.out
+
+
+def test_main_reports_missing_replay_input_to_stderr(monkeypatch, capsys) -> None:
+    config = VisionOSConfig(
+        source_mode=SourceMode.REPLAY,
+        input_path="missing-replay.jsonl",
+    )
+
+    monkeypatch.setattr(app, "parse_args", lambda: config)
+    monkeypatch.setattr(app, "_load_selected_profile", lambda _config: None)
+
+    assert app.main() == 1
+
+    captured = capsys.readouterr()
+    assert "Replay input not found: missing-replay.jsonl" in captured.err
+
+
+def test_finalize_run_prints_benchmark_summary_to_stdout(capsys) -> None:
+    tracker = app.BenchmarkTracker()
+    tracker.record_inference(0.0, 12.0, ContextLabel.CASUAL_USE)
+
+    class _Logger:
+        def log(self, event: str, **kwargs) -> None:
+            pass
+
+    result = app._finalize_run(VisionOSConfig(source_mode=SourceMode.REPLAY), tracker, _Logger())
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "Benchmark summary:" in captured.out
