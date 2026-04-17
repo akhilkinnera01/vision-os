@@ -54,6 +54,7 @@ def load_runtime_config_file(config_path: str) -> VisionOSConfig:
         profile_path=_resolve_optional_path(base_dir, payload.get("profile_file"), must_exist=False),
         zones_path=_resolve_optional_path(base_dir, payload.get("zones_file"), must_exist=False),
         trigger_path=_resolve_optional_path(base_dir, payload.get("trigger_file"), must_exist=False),
+        integrations_path=_resolve_optional_path(base_dir, payload.get("integrations_file"), must_exist=False),
         record_path=_resolve_optional_path(base_dir, payload.get("record"), must_exist=False),
         benchmark_output_path=_resolve_optional_path(base_dir, payload.get("benchmark_output"), must_exist=False),
         history_output_path=_resolve_optional_path(base_dir, payload.get("history_output"), must_exist=False),
@@ -73,6 +74,7 @@ def load_runtime_config_file(config_path: str) -> VisionOSConfig:
         policy_explicit=("policy" in payload) or ("policy_file" in payload),
         zones_explicit="zones_file" in payload,
         trigger_explicit="trigger_file" in payload,
+        integrations_explicit="integrations_file" in payload,
         overlay_mode_explicit="overlay_mode" in payload,
     )
 
@@ -105,6 +107,8 @@ def write_runtime_config_file(config: VisionOSConfig, config_path: str) -> str:
         payload["zones_file"] = _relativize_path(path.parent, config.zones_path)
     if config.trigger_path is not None:
         payload["trigger_file"] = _relativize_path(path.parent, config.trigger_path)
+    if config.integrations_path is not None:
+        payload["integrations_file"] = _relativize_path(path.parent, config.integrations_path)
     if config.record_path is not None:
         payload["record"] = _relativize_path(path.parent, config.record_path)
     if config.benchmark_output_path is not None:
@@ -145,6 +149,9 @@ def write_starter_bundle(
     trigger_path = bundle_dir / "visionos.triggers.yaml"
     trigger_path.write_text(_starter_triggers_template(), encoding="utf-8")
 
+    integrations_path = bundle_dir / "visionos.integrations.yaml"
+    integrations_path.write_text(_starter_integrations_template(), encoding="utf-8")
+
     config_path = bundle_dir / "visionos.config.yaml"
     write_runtime_config_file(
         VisionOSConfig(
@@ -164,6 +171,7 @@ def write_starter_bundle(
         config_path=str(config_path),
         zones_path=str(zones_path),
         trigger_path=str(trigger_path),
+        integrations_path=str(integrations_path),
     )
 
 
@@ -203,4 +211,13 @@ def _starter_triggers_template() -> str:
         "# Add trigger rules here, then reference this file with --trigger-file or\n"
         "# uncomment trigger_file in visionos.config.yaml after the rules are ready.\n"
         "triggers: []\n"
+    )
+
+
+def _starter_integrations_template() -> str:
+    return (
+        "# Starter integrations file for Vision OS.\n"
+        "# Add integration targets here, then reference this file with --integrations-file or\n"
+        "# uncomment integrations_file in visionos.config.yaml after the targets are ready.\n"
+        "integrations: []\n"
     )

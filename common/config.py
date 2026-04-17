@@ -28,6 +28,7 @@ class VisionOSConfig:
     profile_path: str | None = None
     zones_path: str | None = None
     trigger_path: str | None = None
+    integrations_path: str | None = None
     record_path: str | None = None
     benchmark_output_path: str | None = None
     history_output_path: str | None = None
@@ -42,4 +43,5 @@ class VisionOSConfig:
     policy_explicit: bool = False
     zones_explicit: bool = False
     trigger_explicit: bool = False
+    integrations_explicit: bool = False
     overlay_mode_explicit: bool = False

@@ -44,12 +44,12 @@ def test_main_routes_headless_webcam_through_streaming(monkeypatch) -> None:
     monkeypatch.setattr(
         app,
         "_run_streaming_mode",
-        lambda *_args: calls.append("streaming") or 0,
+        lambda *_args, **_kwargs: calls.append("streaming") or 0,
     )
     monkeypatch.setattr(
         app,
         "_run_sequential_mode",
-        lambda *_args: calls.append("sequential") or 0,
+        lambda *_args, **_kwargs: calls.append("sequential") or 0,
     )
 
     assert app.main() == 0
@@ -109,8 +109,8 @@ def test_main_loads_zone_config_before_running(monkeypatch) -> None:
     monkeypatch.setattr(app, "load_zones", lambda path: [SimpleNamespace(zone_id="desk_a"), SimpleNamespace(zone_id="desk_b")])
     monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
-    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: calls.append("streaming") or 0)
-    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: calls.append("sequential") or 0)
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: calls.append("streaming") or 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: calls.append("sequential") or 0)
 
     assert app.main() == 0
     assert calls == ["streaming"]
@@ -135,12 +135,12 @@ def test_main_passes_trigger_config_into_sequential_runtime(monkeypatch) -> None
     monkeypatch.setattr(
         app,
         "_run_streaming_mode",
-        lambda *_args: 0,
+        lambda *_args, **_kwargs: 0,
     )
     monkeypatch.setattr(
         app,
         "_run_sequential_mode",
-        lambda _config, _policy, _zones, trigger_config, _source, _renderer, _logger: captured.update({"trigger_config": trigger_config}) or 0,
+        lambda _config, _policy, _zones, trigger_config, _source, _renderer, _logger, **_kwargs: captured.update({"trigger_config": trigger_config}) or 0,
     )
 
     assert app.main() == 0
@@ -194,7 +194,7 @@ def test_run_sequential_mode_records_trigger_records(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(
         app,
         "VisionPipeline",
-        lambda _config, policy=None, zones=(), trigger_config=None, benchmark_tracker=None: SimpleNamespace(
+        lambda _config, policy=None, zones=(), trigger_config=None, benchmark_tracker=None, **_kwargs: SimpleNamespace(
             process=lambda _packet: SimpleNamespace(
                 detections=[],
                 decision=SimpleNamespace(label=ContextLabel.FOCUSED_WORK),
@@ -271,7 +271,7 @@ def test_run_sequential_mode_records_history_records(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(
         app,
         "VisionPipeline",
-        lambda _config, policy=None, zones=(), trigger_config=None, benchmark_tracker=None: SimpleNamespace(
+        lambda _config, policy=None, zones=(), trigger_config=None, benchmark_tracker=None, **_kwargs: SimpleNamespace(
             process=lambda _packet: SimpleNamespace(
                 detections=[],
                 decision=SimpleNamespace(label=ContextLabel.FOCUSED_WORK),

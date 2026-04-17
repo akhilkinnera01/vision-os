@@ -21,6 +21,7 @@ def format_startup_summary(
     policy_name: str,
     zone_count: int,
     trigger_count: int,
+    integration_count: int = 0,
     profile_id: str | None,
 ) -> str:
     """Render a human-readable runtime overview before the main loop starts."""
@@ -34,11 +35,17 @@ def format_startup_summary(
         f"Headless: {str(config.headless).lower()}",
         f"Zones: {zone_count} loaded",
         f"Triggers: {trigger_count} enabled",
+        f"Integrations: {integration_count} enabled",
         f"Benchmark: {config.benchmark_output_path or 'disabled'}",
         f"History: {config.history_output_path or 'disabled'}",
         f"Session summary: {config.session_summary_output_path or 'disabled'}",
     ]
-    hints = collect_runtime_hints(config, zone_count=zone_count, trigger_count=trigger_count)
+    hints = collect_runtime_hints(
+        config,
+        zone_count=zone_count,
+        trigger_count=trigger_count,
+        integration_count=integration_count,
+    )
     if hints:
         lines.append("Hints:")
         for hint in hints:
@@ -46,7 +53,13 @@ def format_startup_summary(
     return "\n".join(lines)
 
 
-def collect_runtime_hints(config: VisionOSConfig, *, zone_count: int, trigger_count: int) -> tuple[str, ...]:
+def collect_runtime_hints(
+    config: VisionOSConfig,
+    *,
+    zone_count: int,
+    trigger_count: int,
+    integration_count: int = 0,
+) -> tuple[str, ...]:
     """Collect lightweight operator hints for first-run usability."""
     hints: list[str] = []
     if config.source_mode == SourceMode.WEBCAM:
@@ -60,6 +73,8 @@ def collect_runtime_hints(config: VisionOSConfig, *, zone_count: int, trigger_co
         hints.append("No zones configured yet; zone-level state is disabled.")
     if trigger_count == 0:
         hints.append("No triggers enabled; automation outputs are disabled.")
+    if integration_count == 0:
+        hints.append("No integrations configured; external dispatch is disabled.")
     if config.record_path:
         hints.append(f"Replay artifact will be written to {config.record_path}.")
     if config.benchmark_output_path:

@@ -11,7 +11,7 @@ from common.config import VisionOSConfig
 from common.models import SourceMode
 from common.policy import load_policy
 from common.profile import RuntimeProfile, load_profile
-from integrations import load_trigger_config
+from integrations import load_integration_config, load_trigger_config
 from perception.detector import YOLODetector
 from runtime.io import ReplayFrameSource, VideoFrameSource, WebcamFrameSource
 from setupux.models import ValidationCheck, ValidationReport, ValidationStatus
@@ -40,6 +40,7 @@ def validate_runtime_setup(config: VisionOSConfig, *, include_model_check: bool 
         _check_policy(effective_config),
         _check_zones(effective_config),
         _check_triggers(effective_config),
+        _check_integrations(effective_config),
         ValidationCheck(name="source", status=source_status, detail=source_detail),
         _check_output_paths(effective_config),
     ]
@@ -160,4 +161,18 @@ def _check_triggers(config: VisionOSConfig) -> ValidationCheck:
         name="triggers",
         status=ValidationStatus.OK,
         detail=f"Loaded {len(trigger_config.rules)} trigger rules",
+    )
+
+
+def _check_integrations(config: VisionOSConfig) -> ValidationCheck:
+    if not config.integrations_path:
+        return ValidationCheck(name="integrations", status=ValidationStatus.SKIPPED, detail="No integrations file configured")
+    try:
+        integration_config = load_integration_config(config.integrations_path)
+    except Exception as exc:
+        return ValidationCheck(name="integrations", status=ValidationStatus.ERROR, detail=str(exc))
+    return ValidationCheck(
+        name="integrations",
+        status=ValidationStatus.OK,
+        detail=f"Loaded {len(integration_config.targets)} integration targets",
     )
