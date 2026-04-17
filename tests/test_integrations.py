@@ -100,7 +100,7 @@ def test_trigger_engine_logs_dispatch_failures(monkeypatch, tmp_path: Path, caps
         logger=logger,
     )
 
-    monkeypatch.setattr("integrations.engine.urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("integrations.dispatcher.urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
     engine.dispatch(
         [
             VisionEvent(

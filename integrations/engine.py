@@ -1,16 +1,11 @@
-"""Dispatch matched events to log, webhook, and MQTT outputs."""
+"""Stateful trigger evaluation over runtime snapshots."""
 
 from __future__ import annotations
 
-import json
-import sys
-from pathlib import Path
-from urllib.request import Request, urlopen
-
 from common.models import ContextLabel, Decision, SceneMetrics, TemporalState, VisionEvent
 from integrations.config import TriggerConfig, TriggerRule
+from integrations.dispatcher import TriggerDispatcher
 from integrations.models import TriggerRuleState, TriggerSnapshot, TriggeredActionRecord
-from integrations.mqtt import publish_json
 from telemetry.logging import VisionLogger
 
 
@@ -20,6 +15,7 @@ class TriggerEngine:
     def __init__(self, config: TriggerConfig, logger: VisionLogger | None = None) -> None:
         self.config = config
         self.logger = logger
+        self.dispatcher = TriggerDispatcher(logger=logger)
         self._rule_states: dict[str, TriggerRuleState] = {
             rule.rule_id: TriggerRuleState() for rule in self.config.rules
         }
@@ -33,7 +29,13 @@ class TriggerEngine:
             matched, matching_event = self._condition_result(rule, snapshot)
             if rule.condition.source.startswith("event."):
                 if matched and self._cooldown_ready(rule, state, snapshot.timestamp):
-                    records.extend(self._run_actions(rule, snapshot, matching_event))
+                    records.extend(
+                        self.dispatcher.dispatch(
+                            rule,
+                            timestamp=snapshot.timestamp,
+                            payload=self._event_payload(rule, snapshot, matching_event),
+                        )
+                    )
                     state.last_fired_at = snapshot.timestamp
                     state.fire_count += 1
                 continue
@@ -51,7 +53,13 @@ class TriggerEngine:
                     and duration_ok
                     and self._cooldown_ready(rule, state, snapshot.timestamp)
                 ):
-                    records.extend(self._run_actions(rule, snapshot, matching_event))
+                    records.extend(
+                        self.dispatcher.dispatch(
+                            rule,
+                            timestamp=snapshot.timestamp,
+                            payload=self._event_payload(rule, snapshot, matching_event),
+                        )
+                    )
                     state.last_fired_at = snapshot.timestamp
                     state.fire_count += 1
                     state.fired_in_current_streak = True
@@ -140,112 +148,3 @@ class TriggerEngine:
             },
             "event": None if event is None else event.to_dict(),
         }
-
-    def _run_actions(
-        self,
-        rule: TriggerRule,
-        snapshot: TriggerSnapshot,
-        event: VisionEvent | None,
-    ) -> list[TriggeredActionRecord]:
-        payload_dict = self._event_payload(rule, snapshot, event)
-        payload = json.dumps(payload_dict).encode("utf-8")
-        records: list[TriggeredActionRecord] = []
-        for action in rule.actions:
-            if action.action_type == "stdout":
-                print(json.dumps(payload_dict))
-                records.append(
-                    TriggeredActionRecord(
-                        trigger_id=rule.rule_id,
-                        action_type="stdout",
-                        timestamp=snapshot.timestamp,
-                        target=None,
-                        payload=payload_dict,
-                        success=True,
-                    )
-                )
-                continue
-            if action.action_type == "file_append":
-                self._write_log(action.target or "", payload)
-                records.append(
-                    TriggeredActionRecord(
-                        trigger_id=rule.rule_id,
-                        action_type="file_append",
-                        timestamp=snapshot.timestamp,
-                        target=action.target,
-                        payload=payload_dict,
-                        success=True,
-                    )
-                )
-                continue
-            if action.action_type == "log":
-                if self.logger is not None:
-                    self.logger.log(action.target or "trigger_fired", trigger_id=rule.rule_id, payload=payload_dict)
-                records.append(
-                    TriggeredActionRecord(
-                        trigger_id=rule.rule_id,
-                        action_type="log",
-                        timestamp=snapshot.timestamp,
-                        target=action.target,
-                        payload=payload_dict,
-                        success=True,
-                    )
-                )
-                continue
-            if action.action_type == "webhook":
-                error = self._post_webhook(action.target or "", payload)
-                records.append(
-                    TriggeredActionRecord(
-                        trigger_id=rule.rule_id,
-                        action_type="webhook",
-                        timestamp=snapshot.timestamp,
-                        target=action.target,
-                        payload=payload_dict,
-                        success=error is None,
-                        error=error,
-                    )
-                )
-                continue
-            if action.action_type == "mqtt_publish":
-                topic = action.mqtt_topic or action.target or ""
-                error = self._publish_mqtt(action.mqtt_host or "", action.mqtt_port, topic, payload)
-                records.append(
-                    TriggeredActionRecord(
-                        trigger_id=rule.rule_id,
-                        action_type="mqtt_publish",
-                        timestamp=snapshot.timestamp,
-                        target=topic,
-                        payload=payload_dict,
-                        success=error is None,
-                        error=error,
-                    )
-                )
-                continue
-            raise ValueError(f"Unsupported trigger action type: {action.action_type}")
-        return records
-
-    def _write_log(self, path: str, payload: bytes) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("ab") as handle:
-            handle.write(payload + b"\n")
-
-    def _post_webhook(self, url: str, payload: bytes) -> str | None:
-        request = Request(url=url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        try:
-            with urlopen(request, timeout=2.0):
-                return None
-        except Exception as exc:  # pragma: no cover - exercised via tests with mocking
-            self._log_failure("webhook", url, exc)
-            return str(exc)
-
-    def _publish_mqtt(self, host: str, port: int, topic: str, payload: bytes) -> str | None:
-        try:
-            publish_json(host, port, topic, payload)
-            return None
-        except Exception as exc:  # pragma: no cover - exercised via tests with mocking
-            self._log_failure("mqtt", f"{host}:{port}/{topic}", exc)
-            return str(exc)
-
-    def _log_failure(self, sink: str, target: str, exc: Exception) -> None:
-        if self.logger is not None:
-            self.logger.log("trigger_dispatch_failed", sink=sink, target=target, error=str(exc))
