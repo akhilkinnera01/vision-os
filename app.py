@@ -19,6 +19,7 @@ from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, Webc
 from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
+from zones import ZoneConfigError, load_zones
 
 
 def parse_args() -> VisionOSConfig:
@@ -27,6 +28,7 @@ def parse_args() -> VisionOSConfig:
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
+    parser.add_argument("--zones-file", help="Optional path to a YAML file that defines static polygon zones.")
     parser.add_argument("--model", default="yolov8n.pt", help="YOLO weights path or name.")
     parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold.")
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference size.")
@@ -75,6 +77,7 @@ def parse_args() -> VisionOSConfig:
         max_detections=args.max_detections,
         source_mode=source_mode,
         input_path=args.input,
+        zones_path=args.zones_file,
         record_path=args.record,
         benchmark_output_path=args.benchmark_output,
         policy_name=args.policy,
@@ -113,24 +116,29 @@ def _build_source(config: VisionOSConfig):
 
 def _validate_input_path(config: VisionOSConfig) -> None:
     """Fail fast with a readable CLI error when file-backed inputs are missing."""
-    if config.source_mode not in {SourceMode.VIDEO, SourceMode.REPLAY}:
-        return
+    if config.source_mode in {SourceMode.VIDEO, SourceMode.REPLAY}:
+        input_path = Path(config.input_path or "")
+        if not input_path.is_file():
+            source_name = "video" if config.source_mode == SourceMode.VIDEO else "replay"
+            raise FileNotFoundError(f"{source_name.capitalize()} input not found: {input_path}")
 
-    input_path = Path(config.input_path or "")
-    if not input_path.is_file():
-        source_name = "video" if config.source_mode == SourceMode.VIDEO else "replay"
-        raise FileNotFoundError(f"{source_name.capitalize()} input not found: {input_path}")
+    if config.zones_path:
+        zones_path = Path(config.zones_path)
+        if not zones_path.is_file():
+            raise FileNotFoundError(f"Zone config not found: {zones_path}")
 
 
-def _log_run_started(config: VisionOSConfig, policy_name: str, logger: VisionLogger) -> None:
+def _log_run_started(config: VisionOSConfig, policy_name: str, zone_count: int, logger: VisionLogger) -> None:
     """Emit one structured record that captures the active runtime configuration."""
     logger.log(
         "run_started",
         mode=config.source_mode.value,
         policy=policy_name,
+        zone_count=zone_count,
         overlay_mode=config.overlay_mode.value,
         headless=config.headless,
         temporal_window_seconds=config.temporal_window_seconds,
+        zones_path=config.zones_path,
         record_path=config.record_path,
         benchmark_output_path=config.benchmark_output_path,
     )
@@ -326,14 +334,15 @@ def main() -> int:
         config = parse_args()
         _validate_input_path(config)
         policy = load_policy(name=config.policy_name, path=config.policy_path)
+        zones = load_zones(config.zones_path) if config.zones_path else ()
         logger = VisionLogger(config.log_json)
         renderer = FrameRenderer(config.overlay_mode)
         source = _build_source(config)
-    except (FileNotFoundError, PolicyValidationError, ValueError) as exc:
+    except (FileNotFoundError, PolicyValidationError, ZoneConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    _log_run_started(config, policy.name, logger)
+    _log_run_started(config, policy.name, len(zones), logger)
     if _should_use_streaming_runtime(config):
         return _run_streaming_mode(config, policy, source, renderer, logger)
     return _run_sequential_mode(config, policy, source, renderer, logger)

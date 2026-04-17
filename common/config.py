@@ -19,6 +19,7 @@ class VisionOSConfig:
     max_detections: int = 25
     source_mode: SourceMode = SourceMode.WEBCAM
     input_path: str | None = None
+    zones_path: str | None = None
     record_path: str | None = None
     benchmark_output_path: str | None = None
     policy_name: str = "default"
