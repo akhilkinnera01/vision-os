@@ -169,13 +169,11 @@ def test_load_profile_supports_all_builtin_profiles(profile_name: str) -> None:
 
 
 def test_builtin_profiles_reference_packaged_trigger_sets() -> None:
-    workstation = load_profile(name="workstation")
-    meeting_room = load_profile(name="meeting_room")
+    for profile_name in ["workstation", "study_room", "meeting_room", "lab_bench", "waiting_area"]:
+        profile = load_profile(name=profile_name)
 
-    assert workstation.trigger_path is not None
-    assert meeting_room.trigger_path is not None
-    assert Path(workstation.trigger_path).is_file()
-    assert Path(meeting_room.trigger_path).is_file()
+        assert profile.trigger_path is not None
+        assert Path(profile.trigger_path).is_file()
 
 
 def test_load_profile_rejects_missing_trigger_reference(tmp_path: Path) -> None:

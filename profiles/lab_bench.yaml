@@ -2,6 +2,7 @@ id: lab_bench
 name: Lab Bench
 description: Bench-centric profile that emphasizes activity and trigger visibility.
 policy: office
+trigger_file: triggers/lab_bench.yaml
 presentation:
   overlay_mode: debug
   compact_sections:
