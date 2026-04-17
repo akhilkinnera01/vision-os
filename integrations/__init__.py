@@ -3,6 +3,7 @@
 from integrations.config import IntegrationConfigError, load_integration_config, load_trigger_config
 from integrations.dispatcher import IntegrationDispatcher, TriggerDispatcher
 from integrations.engine import TriggerEngine
+from integrations.publisher import IntegrationPublisher
 from integrations.models import (
     DispatchRecord,
     IntegrationConfig,
@@ -21,6 +22,7 @@ __all__ = [
     "IntegrationConfigError",
     "IntegrationDispatcher",
     "IntegrationEnvelope",
+    "IntegrationPublisher",
     "IntegrationTarget",
     "TriggerDispatcher",
     "TriggerAction",
