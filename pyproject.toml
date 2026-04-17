@@ -46,6 +46,8 @@ include = [
   "state.*",
   "tracking",
   "tracking.*",
+  "zones",
+  "zones.*",
   "events",
   "events.*",
   "telemetry",
