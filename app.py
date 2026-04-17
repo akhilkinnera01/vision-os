@@ -15,7 +15,7 @@ from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
 from common.profile import ProfileValidationError, RuntimeProfile, load_profile
 from common.policy import PolicyValidationError, load_policy
-from integrations import IntegrationConfigError, load_trigger_config
+from integrations import IntegrationConfigError, IntegrationPublisher, load_integration_config, load_trigger_config
 from runtime.benchmark import BenchmarkTracker
 from runtime.history import HistoryRecorder, SessionAnalyticsEngine
 from runtime.pipeline import InferenceOutput, VisionPipeline
@@ -47,6 +47,7 @@ def parse_args() -> VisionOSConfig:
     parser.add_argument("--profile-file", help="Optional path to a custom runtime profile YAML file.")
     parser.add_argument("--zones-file", help="Optional path to a YAML file that defines static polygon zones.")
     parser.add_argument("--trigger-file", help="Optional path to a YAML file that defines event trigger outputs.")
+    parser.add_argument("--integrations-file", help="Optional path to a YAML file that defines generic integration targets.")
     parser.add_argument("--model", default="yolov8n.pt", help="YOLO weights path or name.")
     parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold.")
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference size.")
@@ -120,6 +121,9 @@ def parse_args() -> VisionOSConfig:
         profile_path=args.profile_file if "--profile-file" in argv else config_from_file.profile_path,
         zones_path=args.zones_file if "--zones-file" in argv else config_from_file.zones_path,
         trigger_path=args.trigger_file if "--trigger-file" in argv else config_from_file.trigger_path,
+        integrations_path=(
+            args.integrations_file if "--integrations-file" in argv else config_from_file.integrations_path
+        ),
         record_path=args.record if "--record" in argv else config_from_file.record_path,
         benchmark_output_path=(
             args.benchmark_output if "--benchmark-output" in argv else config_from_file.benchmark_output_path
@@ -142,6 +146,7 @@ def parse_args() -> VisionOSConfig:
         policy_explicit=(("--policy" in argv) or ("--policy-file" in argv)) or config_from_file.policy_explicit,
         zones_explicit=("--zones-file" in argv) or config_from_file.zones_explicit,
         trigger_explicit=("--trigger-file" in argv) or config_from_file.trigger_explicit,
+        integrations_explicit=("--integrations-file" in argv) or config_from_file.integrations_explicit,
         overlay_mode_explicit=("--overlay-mode" in argv) or config_from_file.overlay_mode_explicit,
     )
 
@@ -194,6 +199,8 @@ def _apply_profile_defaults(config: VisionOSConfig, profile: RuntimeProfile) -> 
         resolved = replace(resolved, zones_path=profile.zones_path)
     if not resolved.trigger_explicit and profile.trigger_path is not None:
         resolved = replace(resolved, trigger_path=profile.trigger_path)
+    if not resolved.integrations_explicit and profile.integrations_path is not None:
+        resolved = replace(resolved, integrations_path=profile.integrations_path)
     if not resolved.overlay_mode_explicit:
         resolved = replace(resolved, overlay_mode=profile.presentation.overlay_mode)
     return resolved
@@ -222,6 +229,10 @@ def _validate_input_path(config: VisionOSConfig) -> None:
         trigger_path = Path(config.trigger_path)
         if not trigger_path.is_file():
             raise FileNotFoundError(f"Trigger config not found: {trigger_path}")
+    if config.integrations_path:
+        integrations_path = Path(config.integrations_path)
+        if not integrations_path.is_file():
+            raise FileNotFoundError(f"Integration config not found: {integrations_path}")
 
 
 def _log_run_started(
@@ -244,6 +255,7 @@ def _log_run_started(
         temporal_window_seconds=config.temporal_window_seconds,
         zones_path=config.zones_path,
         trigger_path=config.trigger_path,
+        integrations_path=config.integrations_path,
         record_path=config.record_path,
         benchmark_output_path=config.benchmark_output_path,
         history_output_path=config.history_output_path,
@@ -257,6 +269,7 @@ def _finalize_run(
     logger: VisionLogger,
     *,
     analytics_engine: SessionAnalyticsEngine | None = None,
+    integration_publisher: IntegrationPublisher | None = None,
 ) -> int:
     """Persist run artifacts, emit completion logs, and print the benchmark summary."""
     if config.record_path and config.source_mode != SourceMode.REPLAY:
@@ -296,6 +309,8 @@ def _finalize_run(
         total_event_count=None if analytics_summary is None else sum(analytics_summary.event_counts.values()),
         focus_duration_seconds=None if analytics_summary is None else analytics_summary.focus_duration_seconds,
     )
+    if analytics_summary is not None and integration_publisher is not None:
+        integration_publisher.publish_session_summary(analytics_summary)
     print(f"Benchmark summary: {summary.to_dict()}")
     return 0
 
@@ -305,7 +320,17 @@ def _should_use_streaming_runtime(config: VisionOSConfig) -> bool:
     return config.source_mode == SourceMode.WEBCAM
 
 
-def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_streaming_mode(
+    config: VisionOSConfig,
+    policy,
+    zones,
+    trigger_config,
+    source,
+    renderer: FrameRenderer,
+    logger: VisionLogger,
+    integration_config=None,
+    profile_id: str | None = None,
+) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path, camera=config.camera_index)
@@ -322,6 +347,16 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
         else None
     )
     history_recorder = HistoryRecorder(config.history_output_path) if config.history_output_path else None
+    integration_publisher = (
+        IntegrationPublisher(
+            integration_config,
+            source_mode=config.source_mode.value,
+            profile_id=profile_id,
+            logger=logger,
+        )
+        if integration_config is not None
+        else None
+    )
 
     frame_queue: queue.Queue = queue.Queue(maxsize=1)
     result_queue: queue.Queue = queue.Queue(maxsize=1)
@@ -333,6 +368,9 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
             policy=policy,
             zones=tuple(zones),
             trigger_config=trigger_config,
+            integration_config=integration_config,
+            profile_id=profile_id,
+            integration_publisher=integration_publisher,
             benchmark_tracker=benchmark_tracker,
         )
         while not stop_event.is_set():
@@ -343,6 +381,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
             try:
                 output = pipeline.process(packet)
                 history_record = getattr(output, "history_record", None)
+                integration_records = getattr(output, "integration_records", ())
                 if recorder is not None:
                     recorder.write(
                         frame_index=packet.frame_index,
@@ -352,6 +391,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
                         events=output.events,
                         zone_states=output.zone_states,
                         trigger_records=output.trigger_records,
+                        integration_records=integration_records,
                         history_record=history_record,
                     )
                 if history_record is not None:
@@ -415,10 +455,26 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
         if not config.headless:
             cv2.destroyAllWindows()
 
-    return _finalize_run(config, benchmark_tracker, logger, analytics_engine=analytics_engine)
+    return _finalize_run(
+        config,
+        benchmark_tracker,
+        logger,
+        analytics_engine=analytics_engine,
+        integration_publisher=integration_publisher,
+    )
 
 
-def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_sequential_mode(
+    config: VisionOSConfig,
+    policy,
+    zones,
+    trigger_config,
+    source,
+    renderer: FrameRenderer,
+    logger: VisionLogger,
+    integration_config=None,
+    profile_id: str | None = None,
+) -> int:
     """Run video or replay modes deterministically without dropping frames."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path)
@@ -434,11 +490,24 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
         else None
     )
     history_recorder = HistoryRecorder(config.history_output_path) if config.history_output_path else None
+    integration_publisher = (
+        IntegrationPublisher(
+            integration_config,
+            source_mode=config.source_mode.value,
+            profile_id=profile_id,
+            logger=logger,
+        )
+        if integration_config is not None
+        else None
+    )
     pipeline = VisionPipeline(
         config,
         policy=policy,
         zones=tuple(zones),
         trigger_config=trigger_config,
+        integration_config=integration_config,
+        profile_id=profile_id,
+        integration_publisher=integration_publisher,
         benchmark_tracker=benchmark_tracker,
     )
 
@@ -450,6 +519,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
                 break
             output = pipeline.process(packet)
             history_record = getattr(output, "history_record", None)
+            integration_records = getattr(output, "integration_records", ())
             if recorder is not None:
                 recorder.write(
                     frame_index=packet.frame_index,
@@ -459,6 +529,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
                     events=output.events,
                     zone_states=output.zone_states,
                     trigger_records=output.trigger_records,
+                    integration_records=integration_records,
                     history_record=history_record,
                 )
             if history_record is not None:
@@ -491,7 +562,13 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
         if not config.headless:
             cv2.destroyAllWindows()
 
-    return _finalize_run(config, benchmark_tracker, logger, analytics_engine=analytics_engine)
+    return _finalize_run(
+        config,
+        benchmark_tracker,
+        logger,
+        analytics_engine=analytics_engine,
+        integration_publisher=integration_publisher,
+    )
 
 
 def main() -> int:
@@ -522,10 +599,11 @@ def main() -> int:
             active_profile=None if profile is None else profile.profile_id,
         )
         trigger_config = load_trigger_config(config.trigger_path) if config.trigger_path else None
+        integration_config = load_integration_config(config.integrations_path) if config.integrations_path else None
         logger = VisionLogger(config.log_json)
         renderer = FrameRenderer(
             config.overlay_mode,
-            presentation=None if profile is None else profile.presentation,
+            presentation=None if profile is None else getattr(profile, "presentation", None),
         )
         source = _build_source(config)
     except (
@@ -541,19 +619,45 @@ def main() -> int:
         return 1
 
     trigger_count = 0 if trigger_config is None else len(getattr(trigger_config, "rules", ()))
+    integration_count = (
+        0
+        if integration_config is None
+        else sum(1 for target in getattr(integration_config, "targets", ()) if getattr(target, "enabled", True))
+    )
     print(
         format_startup_summary(
             config,
             policy_name=policy.name,
             zone_count=len(zones),
             trigger_count=trigger_count,
+            integration_count=integration_count,
             profile_id=None if profile is None else profile.profile_id,
         )
     )
     _log_run_started(config, policy.name, len(zones), logger, profile_id=None if profile is None else profile.profile_id)
     if _should_use_streaming_runtime(config):
-        return _run_streaming_mode(config, policy, zones, trigger_config, source, renderer, logger)
-    return _run_sequential_mode(config, policy, zones, trigger_config, source, renderer, logger)
+        return _run_streaming_mode(
+            config,
+            policy,
+            zones,
+            trigger_config,
+            source,
+            renderer,
+            logger,
+            integration_config=integration_config,
+            profile_id=None if profile is None else profile.profile_id,
+        )
+    return _run_sequential_mode(
+        config,
+        policy,
+        zones,
+        trigger_config,
+        source,
+        renderer,
+        logger,
+        integration_config=integration_config,
+        profile_id=None if profile is None else profile.profile_id,
+    )
 
 
 if __name__ == "__main__":

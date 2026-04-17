@@ -1,4 +1,4 @@
-"""Typed trigger and integration models."""
+"""Typed trigger and generic integration models."""
 
 from __future__ import annotations
 
@@ -6,6 +6,85 @@ from dataclasses import dataclass, field
 
 from common.models import Decision, TemporalState, VisionEvent
 from zones.models import ZoneRuntimeState
+
+
+@dataclass(slots=True, frozen=True)
+class IntegrationTarget:
+    """One configured delivery target for a runtime integration source."""
+
+    integration_id: str
+    target_type: str
+    source: str
+    enabled: bool = True
+    target: str | None = None
+    method: str = "POST"
+    mqtt_host: str | None = None
+    mqtt_port: int = 1883
+    mqtt_topic: str | None = None
+    event_types: tuple[str, ...] = ()
+    trigger_ids: tuple[str, ...] = ()
+    interval_seconds: float | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class IntegrationConfig:
+    """Loaded generic integration targets for the runtime."""
+
+    targets: tuple[IntegrationTarget, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class IntegrationEnvelope:
+    """One structured outbound message emitted by the generic integration layer."""
+
+    source: str
+    timestamp: float
+    source_mode: str
+    scene_label: str | None
+    confidence: float | None
+    profile_id: str | None = None
+    metrics: dict[str, object] = field(default_factory=dict)
+    risk_flags: tuple[str, ...] = ()
+    payload: dict[str, object] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "timestamp": self.timestamp,
+            "source_mode": self.source_mode,
+            "scene_label": self.scene_label,
+            "confidence": self.confidence,
+            "profile_id": self.profile_id,
+            "metrics": self.metrics,
+            "risk_flags": list(self.risk_flags),
+            "payload": self.payload,
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class DispatchRecord:
+    """One attempted generic integration dispatch."""
+
+    integration_id: str
+    target_type: str
+    source: str
+    timestamp: float
+    target: str | None
+    payload: dict[str, object]
+    success: bool
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "integration_id": self.integration_id,
+            "target_type": self.target_type,
+            "source": self.source,
+            "timestamp": self.timestamp,
+            "target": self.target,
+            "payload": self.payload,
+            "success": self.success,
+            "error": self.error,
+        }
 
 
 @dataclass(slots=True, frozen=True)

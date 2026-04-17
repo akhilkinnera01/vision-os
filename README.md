@@ -39,6 +39,7 @@ to model what is happening over time.
 - zone-aware reasoning for named desks, benches, and room areas through `--zones-file`
 - runtime profiles for workstation, study room, meeting room, lab bench, and waiting area deployments
 - guided setup, saved runtime manifests, and preflight validation through `--setup`, `--config`, and `--validate-config`
+- generic integrations for trigger, event, status, and session-summary publishing
 - structured explanations for both compact and debug rendering
 - benchmark output with FPS, latency, dropped frames, switch rate, stability score, and stage timings
 - replay recording for deterministic debugging and regression testing
@@ -136,6 +137,7 @@ The repo already ships these demo artifacts from the sample flow:
 - `demo/demo-setup-config.yaml`
 - `demo/sample-zones.yaml`
 - `demo/sample-triggers.yaml`
+- `demo/sample-integrations.yaml`
 - `demo/demo-replay.jsonl`
 - `demo/demo-benchmark.json`
 - `demo/demo-history.jsonl`
@@ -159,6 +161,7 @@ The guided flow writes:
 - `visionos.config.yaml`
 - `visionos.zones.yaml`
 - `visionos.triggers.yaml`
+- `visionos.integrations.yaml`
 
 The saved config can then be reused with:
 
@@ -175,8 +178,8 @@ python app.py --demo
 ```
 
 The normal runtime now prints a short startup summary so you can see which config,
-source, profile, outputs, zone count, and trigger count are active before the first
-frame is processed.
+source, profile, outputs, zone count, trigger count, and integration count are active
+before the first frame is processed.
 
 ### Webcam mode
 
@@ -257,6 +260,7 @@ Profiles can contribute:
 
 - a built-in or custom policy file
 - default trigger bundles
+- default integration bundles
 - default zones file references
 - profile-scoped overlay sections
 
@@ -277,6 +281,23 @@ python app.py \
   --trigger-file demo/sample-triggers.yaml \
   --overlay-mode debug
 ```
+
+### Integration mode
+
+Use this when Vision OS should publish runtime outputs to external systems:
+
+```bash
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --trigger-file demo/sample-triggers.yaml \
+  --integrations-file demo/sample-integrations.yaml \
+  --history-output out/history.jsonl \
+  --session-summary-output out/session-summary.json \
+  --headless
+```
+
+See [docs/integrations.md](docs/integrations.md) for the config format and source types.
 
 ### Event history and analytics mode
 
@@ -351,6 +372,7 @@ Replay mode is good for:
 | `--session-summary-output PATH` | write a session analytics summary to JSON |
 | `--zones-file PATH` | load a YAML file with named polygon zones |
 | `--trigger-file PATH` | load a YAML file with event trigger outputs |
+| `--integrations-file PATH` | load a YAML file with generic integration targets |
 | `--profile NAME` | load a built-in runtime profile |
 | `--profile-file PATH` | load a custom runtime profile manifest |
 | `--headless` | disable the OpenCV window |

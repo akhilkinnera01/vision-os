@@ -4,6 +4,7 @@ description: Example custom profile that bundles the committed demo zones and tr
 policy: office
 zones_file: sample-zones.yaml
 trigger_file: sample-triggers.yaml
+integration_file: sample-integrations.yaml
 presentation:
   overlay_mode: debug
   compact_sections:

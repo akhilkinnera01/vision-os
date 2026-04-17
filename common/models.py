@@ -458,6 +458,7 @@ class ReplayRecord:
     events: list[VisionEvent] = field(default_factory=list)
     zone_states: list[dict[str, object]] = field(default_factory=list)
     trigger_records: list[dict[str, object]] = field(default_factory=list)
+    integration_records: list[dict[str, object]] = field(default_factory=list)
     history_record: HistoryRecord | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -470,6 +471,7 @@ class ReplayRecord:
             "events": [event.to_dict() for event in self.events],
             "zone_states": self.zone_states,
             "trigger_records": self.trigger_records,
+            "integration_records": self.integration_records,
         }
         if self.history_record is not None:
             payload["history_record"] = self.history_record.to_dict()
@@ -486,6 +488,7 @@ class ReplayRecord:
             events=[VisionEvent.from_dict(item) for item in payload.get("events", [])],
             zone_states=[dict(item) for item in payload.get("zone_states", [])],
             trigger_records=[dict(item) for item in payload.get("trigger_records", [])],
+            integration_records=[dict(item) for item in payload.get("integration_records", [])],
             history_record=None
             if payload.get("history_record") is None
             else HistoryRecord.from_dict(dict(payload["history_record"])),

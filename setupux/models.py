@@ -37,3 +37,4 @@ class SetupBundle:
     config_path: str
     zones_path: str
     trigger_path: str
+    integrations_path: str

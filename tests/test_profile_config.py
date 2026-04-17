@@ -62,6 +62,28 @@ scene_labels:
     assert profile.trigger_path == str(triggers_path)
 
 
+def test_load_profile_resolves_relative_integration_paths(tmp_path: Path) -> None:
+    integrations_path = tmp_path / "integrations.yaml"
+    integrations_path.write_text("integrations: []\n", encoding="utf-8")
+    profile_path = tmp_path / "profile.yaml"
+    profile_path.write_text(
+        """
+id: custom
+name: Custom
+description: Custom profile
+policy: default
+integration_file: integrations.yaml
+scene_labels:
+  - Focused Work
+""".strip(),
+        encoding="utf-8",
+    )
+
+    profile = load_profile(path=str(profile_path))
+
+    assert profile.integrations_path == str(integrations_path)
+
+
 def test_load_profile_rejects_unknown_overlay_section(tmp_path: Path) -> None:
     profile_path = tmp_path / "profile.yaml"
     profile_path.write_text(

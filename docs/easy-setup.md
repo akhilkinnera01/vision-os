@@ -30,10 +30,11 @@ It then writes:
 - `visionos.config.yaml`
 - `visionos.zones.yaml`
 - `visionos.triggers.yaml`
+- `visionos.integrations.yaml`
 
-The generated config is safe to run immediately. The zone and trigger template files
-are created for later editing, but they are not enabled in the starter manifest until
-you point the runtime at them.
+The generated config is safe to run immediately. The zone, trigger, and integration
+template files are created for later editing, but they are not enabled in the starter
+manifest until you point the runtime at them.
 
 ## Camera Discovery
 
@@ -60,6 +61,7 @@ The validation report checks:
 - effective policy loading
 - effective zones file loading when enabled
 - effective trigger file loading when enabled
+- effective integrations file loading when enabled
 - source open/read health
 - output directory writability
 - model loading unless skipped by a custom caller
@@ -68,7 +70,7 @@ The report is designed to answer the common onboarding questions quickly:
 
 - did my source open?
 - did my profile resolve?
-- are zones and triggers actually active?
+- are zones, triggers, and integrations actually active?
 - will artifacts be writable?
 
 ## Saved Config Workflow
@@ -107,7 +109,7 @@ Normal runs now print a short startup summary before the main loop begins. It in
 - the source descriptor
 - selected profile and policy
 - overlay mode and headless state
-- loaded zone and trigger counts
+- loaded zone, trigger, and integration counts
 - which history, benchmark, and session-summary artifacts are enabled
 
 This is meant to reduce "guess and retry" loops during onboarding and demos.

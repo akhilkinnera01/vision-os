@@ -68,6 +68,7 @@ def test_validate_runtime_setup_resolves_profile_backed_policy_zones_and_trigger
         policy_name="office",
         zones_path="/tmp/profile-zones.yaml",
         trigger_path="/tmp/profile-triggers.yaml",
+        integrations_path="/tmp/profile-integrations.yaml",
         presentation=ProfilePresentation(overlay_mode=OverlayMode.DEBUG),
     )
 
@@ -79,6 +80,7 @@ def test_validate_runtime_setup_resolves_profile_backed_policy_zones_and_trigger
     monkeypatch.setattr("setupux.validate.load_policy", lambda name, path=None: SimpleNamespace(name=name))
     monkeypatch.setattr("setupux.validate.load_zones", lambda path: ("desk_a", "desk_b"))
     monkeypatch.setattr("setupux.validate.load_trigger_config", lambda path: SimpleNamespace(rules=("focus",)))
+    monkeypatch.setattr("setupux.validate.load_integration_config", lambda path: SimpleNamespace(targets=("status", "summary")))
 
     report = validate_runtime_setup(config, include_model_check=False)
     checks = {check.name: check for check in report.checks}
@@ -91,3 +93,5 @@ def test_validate_runtime_setup_resolves_profile_backed_policy_zones_and_trigger
     assert "2 zones" in checks["zones"].detail
     assert checks["triggers"].status == ValidationStatus.OK
     assert "1 trigger" in checks["triggers"].detail
+    assert checks["integrations"].status == ValidationStatus.OK
+    assert "2 integration" in checks["integrations"].detail
