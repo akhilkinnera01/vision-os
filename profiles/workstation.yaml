@@ -1,0 +1,17 @@
+id: workstation
+name: Workstation
+description: Single-user focused workspace defaults.
+policy: office
+presentation:
+  overlay_mode: compact
+  compact_sections:
+    - scores
+    - triggers
+  debug_sections:
+    - scores
+    - events
+    - triggers
+    - runtime
+scene_labels:
+  - Focused Work
+  - Casual Use
