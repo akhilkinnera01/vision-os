@@ -56,6 +56,41 @@ def test_validate_runtime_setup_reports_integration_targets(monkeypatch, tmp_pat
 
     assert checks["integrations"].status == ValidationStatus.OK
     assert "2 integration" in checks["integrations"].detail
+    assert "2 enabled" in checks["integrations"].detail
+
+
+def test_validate_runtime_setup_reports_enabled_integration_target_count(monkeypatch, tmp_path: Path) -> None:
+    replay_path = tmp_path / "session.jsonl"
+    replay_path.write_text("{}\n", encoding="utf-8")
+    config = VisionOSConfig(
+        source_mode=SourceMode.REPLAY,
+        input_path=str(replay_path),
+        integrations_path=str(tmp_path / "integrations.yaml"),
+    )
+
+    monkeypatch.setattr(
+        "setupux.validate._probe_source",
+        lambda resolved_config: ("Read 1 frame from replay input", ValidationStatus.OK),
+    )
+    monkeypatch.setattr(
+        "setupux.validate.load_integration_config",
+        lambda path: type(
+            "IntegrationConfig",
+            (),
+            {
+                "targets": (
+                    type("IntegrationTarget", (), {"enabled": True})(),
+                    type("IntegrationTarget", (), {"enabled": False})(),
+                )
+            },
+        )(),
+    )
+
+    report = validate_runtime_setup(config, include_model_check=False)
+    checks = {check.name: check for check in report.checks}
+
+    assert checks["integrations"].status == ValidationStatus.OK
+    assert checks["integrations"].detail == "Loaded 2 integration targets (1 enabled)"
 
 
 def test_setup_bundle_writes_integrations_template_without_enabling_it(tmp_path: Path) -> None:

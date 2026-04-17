@@ -173,8 +173,12 @@ def _check_integrations(config: VisionOSConfig) -> ValidationCheck:
         integration_config = load_integration_config(config.integrations_path)
     except Exception as exc:
         return ValidationCheck(name="integrations", status=ValidationStatus.ERROR, detail=str(exc))
+    enabled_count = sum(1 for target in integration_config.targets if getattr(target, "enabled", True))
     return ValidationCheck(
         name="integrations",
         status=ValidationStatus.OK,
-        detail=f"Loaded {len(integration_config.targets)} integration targets",
+        detail=(
+            f"Loaded {len(integration_config.targets)} integration targets "
+            f"({enabled_count} enabled)"
+        ),
     )
