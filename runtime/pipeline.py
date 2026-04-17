@@ -138,6 +138,7 @@ class VisionPipeline:
                 }
 
             with timer.measure("zone_decision"):
+                zone_lookup = {zone.zone_id: zone for zone in self.zones}
                 zone_states = tuple(
                     ZoneRuntimeState(
                         zone_id=feature_set.zone_id,
@@ -150,6 +151,7 @@ class VisionPipeline:
                             zone_temporal_states[feature_set.zone_id],
                         ),
                         temporal_state=zone_temporal_states[feature_set.zone_id],
+                        polygon=zone_lookup[feature_set.zone_id].polygon,
                     )
                     for feature_set in zone_feature_sets
                 )
@@ -189,6 +191,7 @@ class VisionPipeline:
                 temporal_state,
                 self.benchmark_tracker.snapshot(),
                 events=events,
+                zone_states=zone_states,
             )
 
         inference_ms = (time.perf_counter() - start) * 1000.0

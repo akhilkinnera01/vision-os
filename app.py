@@ -250,6 +250,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, source, renderer:
                         latest_output.decision,
                         latest_output.explanation,
                         latest_output.runtime_metrics,
+                        latest_output.zone_states,
                     )
 
                 cv2.imshow("Vision OS", annotated_frame)
@@ -313,6 +314,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, source, renderer
                     output.decision,
                     output.explanation,
                     output.runtime_metrics,
+                    output.zone_states,
                 )
                 cv2.imshow("Vision OS", annotated)
                 if cv2.waitKey(1) & 0xFF == ord("q"):

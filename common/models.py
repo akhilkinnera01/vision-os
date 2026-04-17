@@ -268,6 +268,7 @@ class Explanation:
     debug_lines: list[str]
     scores: dict[str, float]
     recent_events: list[str] = field(default_factory=list)
+    zone_summaries: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

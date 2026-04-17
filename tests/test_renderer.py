@@ -11,6 +11,16 @@ from common.models import (
     SceneMetrics,
 )
 from ui.renderer import FrameRenderer
+from zones import (
+    ZoneContext,
+    ZoneContextLabel,
+    ZoneDecision,
+    ZoneFeatureSet,
+    ZonePoint,
+    ZoneRuntimeState,
+    ZoneTemporalState,
+    ZoneType,
+)
 
 
 def make_decision() -> Decision:
@@ -57,6 +67,34 @@ def make_explanation() -> Explanation:
             "stability": 0.89,
         },
         recent_events=["stability_warning"],
+        zone_summaries=["Desk A=solo_focus", "Desk B=empty"],
+    )
+
+
+def make_zone_state() -> ZoneRuntimeState:
+    return ZoneRuntimeState(
+        zone_id="desk_a",
+        zone_name="Desk A",
+        zone_type=ZoneType.OCCUPANCY,
+        feature_set=ZoneFeatureSet(
+            zone_id="desk_a",
+            zone_name="Desk A",
+            zone_type=ZoneType.OCCUPANCY,
+            occupied=True,
+        ),
+        context=ZoneContext(label=ZoneContextLabel.SOLO_FOCUS, confidence=0.88),
+        decision=ZoneDecision(
+            label=ZoneContextLabel.SOLO_FOCUS,
+            confidence=0.88,
+            action="Preserve focus-friendly zone state",
+        ),
+        temporal_state=ZoneTemporalState(stability_score=0.9),
+        polygon=(
+            ZonePoint(40.0, 220.0),
+            ZonePoint(260.0, 220.0),
+            ZonePoint(260.0, 460.0),
+            ZonePoint(40.0, 460.0),
+        ),
     )
 
 
@@ -86,3 +124,35 @@ def test_detection_label_anchor_stays_below_header_when_box_is_near_top() -> Non
     )
 
     assert baseline_y > 176
+
+
+def test_header_layout_includes_zone_summaries_without_overlap() -> None:
+    renderer = FrameRenderer()
+    layout = renderer._build_header_layout(
+        frame_width=1280,
+        frame_height=720,
+        decision=make_decision(),
+        explanation=make_explanation(),
+        runtime_metrics=RuntimeMetrics(frames_processed=42, fps=11.3, average_inference_ms=28.4, dropped_frames=1),
+    )
+
+    assert any("Zones:" in row.text for row in layout.rows)
+    for previous, current in zip(layout.rows, layout.rows[1:]):
+        assert current.top >= previous.bottom + renderer.LINE_GAP
+
+
+def test_renderer_accepts_zone_states_for_overlay() -> None:
+    import numpy as np
+
+    renderer = FrameRenderer()
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    annotated = renderer.render(
+        frame,
+        detections=[],
+        decision=make_decision(),
+        explanation=make_explanation(),
+        runtime_metrics=RuntimeMetrics(frames_processed=1, fps=0.0, average_inference_ms=12.5, dropped_frames=0),
+        zone_states=(make_zone_state(),),
+    )
+
+    assert annotated.shape == frame.shape

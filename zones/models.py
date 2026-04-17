@@ -178,6 +178,7 @@ class ZoneRuntimeState:
     context: ZoneContext
     decision: ZoneDecision
     temporal_state: ZoneTemporalState
+    polygon: tuple[ZonePoint, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -188,4 +189,5 @@ class ZoneRuntimeState:
             "context": self.context.to_dict(),
             "decision": self.decision.to_dict(),
             "temporal_state": self.temporal_state.to_dict(),
+            "polygon": [point.to_list() for point in self.polygon],
         }
