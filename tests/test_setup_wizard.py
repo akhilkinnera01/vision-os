@@ -55,3 +55,29 @@ def test_run_setup_wizard_writes_bundle_and_prints_validation(tmp_path: Path) ->
     assert captured["include_model_check"] is True
     assert any("Validation summary" in line for line in lines)
     assert any("Run it with: python app.py --config" in line for line in lines)
+
+
+def test_run_setup_wizard_surfaces_detected_cameras(monkeypatch, tmp_path: Path) -> None:
+    answers = iter(
+        [
+            ".",
+            "webcam",
+            "",  # accept detected default camera
+            "workstation",
+            "compact",
+        ]
+    )
+    lines: list[str] = []
+
+    monkeypatch.setattr("setupux.wizard.discover_camera_indexes", lambda max_index=5: [2, 4])
+
+    result = run_setup_wizard(
+        input_func=lambda prompt: next(answers),
+        output_func=lines.append,
+        cwd=str(tmp_path),
+        validate_func=lambda config, include_model_check=True: ValidationReport(checks=()),
+    )
+
+    config = load_runtime_config_file(result.bundle.config_path)
+    assert config.camera_index == 2
+    assert any("Detected cameras: 2, 4" in line for line in lines)

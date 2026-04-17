@@ -10,7 +10,7 @@ from common.models import OverlayMode, SourceMode
 from setupux.config_file import load_runtime_config_file, write_starter_bundle
 from setupux.models import SetupBundle, ValidationReport
 from setupux.summary import format_validation_report
-from setupux.validate import validate_runtime_setup
+from setupux.validate import discover_camera_indexes, validate_runtime_setup
 
 
 BUILTIN_PROFILE_CHOICES = (
@@ -54,7 +54,13 @@ def run_setup_wizard(
     camera_index = 0
     input_path = None
     if source_mode == SourceMode.WEBCAM:
-        camera_index = int(_prompt(input_func, "Camera index", "0"))
+        available_cameras = discover_camera_indexes()
+        if available_cameras:
+            output_func("Detected cameras: " + ", ".join(str(index) for index in available_cameras))
+        else:
+            output_func("Detected cameras: none")
+        camera_default = str(available_cameras[0]) if available_cameras else "0"
+        camera_index = int(_prompt(input_func, "Camera index", camera_default))
     else:
         input_path = str(_resolve_path(root, _prompt(input_func, "Input path", "")))
 
