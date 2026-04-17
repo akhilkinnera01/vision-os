@@ -1,0 +1,11 @@
+triggers:
+  - id: workstation-focus-log
+    when:
+      source: decision.label
+      operator: equals
+      value: Focused Work
+      min_duration_seconds: 5
+    then:
+      - type: log
+        event: profile_focus_started
+    cooldown_seconds: 15

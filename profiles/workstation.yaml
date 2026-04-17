@@ -2,6 +2,7 @@ id: workstation
 name: Workstation
 description: Single-user focused workspace defaults.
 policy: office
+trigger_file: triggers/workstation.yaml
 presentation:
   overlay_mode: compact
   compact_sections:
