@@ -1,0 +1,17 @@
+triggers:
+  - id: desk-a-focus-log
+    event_type: zone_focus_started
+    zone_id: desk_a
+    log_path: out/zone-events.jsonl
+
+  - id: whiteboard-group-webhook
+    event_type: zone_group_started
+    zone_id: whiteboard
+    webhook_url: https://example.com/opencheckin/group
+
+  - id: desk-b-clear-mqtt
+    event_type: zone_cleared
+    zone_id: desk_b
+    mqtt_host: 127.0.0.1
+    mqtt_port: 1883
+    mqtt_topic: opencheckin/zones/desk_b

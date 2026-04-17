@@ -112,6 +112,7 @@ The repo already ships these demo artifacts from the sample flow:
 
 - `demo/sample.mp4`
 - `demo/sample-zones.yaml`
+- `demo/sample-triggers.yaml`
 - `demo/demo-replay.jsonl`
 - `demo/demo-benchmark.json`
 - `demo/sample-overlay.png`
@@ -173,6 +174,20 @@ With a zone file, Vision OS keeps the existing frame-level scene label and also
 computes zone-local state such as `empty`, `occupied`, `solo_focus`, and
 `group_activity` for each configured region.
 
+### Triggered zone mode
+
+Use this when zone events should also fan out to local logs, webhooks, or a narrow
+MQTT output:
+
+```bash
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --zones-file demo/sample-zones.yaml \
+  --trigger-file demo/sample-triggers.yaml \
+  --overlay-mode debug
+```
+
 ### Replay mode
 
 Use this when you want to inspect reasoning without rerunning YOLO:
@@ -215,6 +230,7 @@ Replay mode is good for:
 | `--record PATH` | write replayable detections and events to JSONL |
 | `--benchmark-output PATH` | write benchmark metrics to JSON |
 | `--zones-file PATH` | load a YAML file with named polygon zones |
+| `--trigger-file PATH` | load a YAML file with event trigger outputs |
 | `--headless` | disable the OpenCV window |
 | `--log-json` | emit structured logs to stderr |
 | `--max-frames N` | stop after N processed frames |
@@ -321,6 +337,26 @@ Current zone-local labels:
 Zone transitions are emitted as typed events such as `zone_occupied`, `zone_cleared`,
 `zone_focus_started`, and `zone_group_started`, and replay artifacts now persist the
 serialized zone timeline for each frame.
+
+## Trigger Files
+
+Trigger files let you match emitted events and send them to one or more outputs.
+
+```yaml
+triggers:
+  - id: desk-a-focus-log
+    event_type: zone_focus_started
+    zone_id: desk_a
+    log_path: out/zone-events.jsonl
+```
+
+Supported outputs in the current narrow surface:
+
+- local JSONL event log via `log_path`
+- HTTP webhook via `webhook_url`
+- plain MQTT publish via `mqtt_host`, `mqtt_port`, and `mqtt_topic`
+
+Trigger failures are logged and do not stop the inference loop.
 
 ## Output Files
 

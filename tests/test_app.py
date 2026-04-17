@@ -65,6 +65,8 @@ def test_parse_args_accepts_zones_file(monkeypatch) -> None:
             "demo/sample.mp4",
             "--zones-file",
             "config/zones.yaml",
+            "--trigger-file",
+            "config/triggers.yaml",
         ],
     )
 
@@ -72,12 +74,20 @@ def test_parse_args_accepts_zones_file(monkeypatch) -> None:
 
     assert config.source_mode == SourceMode.VIDEO
     assert config.zones_path == "config/zones.yaml"
+    assert config.trigger_path == "config/triggers.yaml"
 
 
 def test_validate_input_path_rejects_missing_zones_file() -> None:
     config = VisionOSConfig(source_mode=SourceMode.WEBCAM, zones_path="missing-zones.yaml")
 
     with pytest.raises(FileNotFoundError, match="Zone config not found"):
+        app._validate_input_path(config)
+
+
+def test_validate_input_path_rejects_missing_trigger_file() -> None:
+    config = VisionOSConfig(source_mode=SourceMode.WEBCAM, trigger_path="missing-triggers.yaml")
+
+    with pytest.raises(FileNotFoundError, match="Trigger config not found"):
         app._validate_input_path(config)
 
 

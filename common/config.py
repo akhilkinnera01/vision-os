@@ -20,6 +20,7 @@ class VisionOSConfig:
     source_mode: SourceMode = SourceMode.WEBCAM
     input_path: str | None = None
     zones_path: str | None = None
+    trigger_path: str | None = None
     record_path: str | None = None
     benchmark_output_path: str | None = None
     policy_name: str = "default"

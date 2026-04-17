@@ -13,6 +13,7 @@ import cv2
 from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
 from common.policy import PolicyValidationError, load_policy
+from integrations import IntegrationConfigError, TriggerEngine, load_trigger_config
 from runtime.benchmark import BenchmarkTracker
 from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
@@ -29,6 +30,7 @@ def parse_args() -> VisionOSConfig:
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
     parser.add_argument("--zones-file", help="Optional path to a YAML file that defines static polygon zones.")
+    parser.add_argument("--trigger-file", help="Optional path to a YAML file that defines event trigger outputs.")
     parser.add_argument("--model", default="yolov8n.pt", help="YOLO weights path or name.")
     parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold.")
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference size.")
@@ -78,6 +80,7 @@ def parse_args() -> VisionOSConfig:
         source_mode=source_mode,
         input_path=args.input,
         zones_path=args.zones_file,
+        trigger_path=args.trigger_file,
         record_path=args.record,
         benchmark_output_path=args.benchmark_output,
         policy_name=args.policy,
@@ -126,6 +129,10 @@ def _validate_input_path(config: VisionOSConfig) -> None:
         zones_path = Path(config.zones_path)
         if not zones_path.is_file():
             raise FileNotFoundError(f"Zone config not found: {zones_path}")
+    if config.trigger_path:
+        trigger_path = Path(config.trigger_path)
+        if not trigger_path.is_file():
+            raise FileNotFoundError(f"Trigger config not found: {trigger_path}")
 
 
 def _log_run_started(config: VisionOSConfig, policy_name: str, zone_count: int, logger: VisionLogger) -> None:
@@ -139,6 +146,7 @@ def _log_run_started(config: VisionOSConfig, policy_name: str, zone_count: int, 
         headless=config.headless,
         temporal_window_seconds=config.temporal_window_seconds,
         zones_path=config.zones_path,
+        trigger_path=config.trigger_path,
         record_path=config.record_path,
         benchmark_output_path=config.benchmark_output_path,
     )
@@ -177,7 +185,7 @@ def _should_use_streaming_runtime(config: VisionOSConfig) -> bool:
     return config.source_mode == SourceMode.WEBCAM
 
 
-def _run_streaming_mode(config: VisionOSConfig, policy, zones, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_engine, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path, camera=config.camera_index)
@@ -206,6 +214,8 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, source, renderer:
                 continue
             try:
                 output = pipeline.process(packet)
+                if trigger_engine is not None:
+                    trigger_engine.dispatch(output.events)
                 if recorder is not None:
                     recorder.write(
                         frame_index=packet.frame_index,
@@ -273,7 +283,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, source, renderer:
     return _finalize_run(config, benchmark_tracker, logger)
 
 
-def _run_sequential_mode(config: VisionOSConfig, policy, zones, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_engine, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run video or replay modes deterministically without dropping frames."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path)
@@ -296,6 +306,8 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, source, renderer
             if packet is None:
                 break
             output = pipeline.process(packet)
+            if trigger_engine is not None:
+                trigger_engine.dispatch(output.events)
             if recorder is not None:
                 recorder.write(
                     frame_index=packet.frame_index,
@@ -339,17 +351,19 @@ def main() -> int:
         _validate_input_path(config)
         policy = load_policy(name=config.policy_name, path=config.policy_path)
         zones = load_zones(config.zones_path) if config.zones_path else ()
+        trigger_config = load_trigger_config(config.trigger_path) if config.trigger_path else None
         logger = VisionLogger(config.log_json)
+        trigger_engine = TriggerEngine(trigger_config, logger=logger) if trigger_config is not None else None
         renderer = FrameRenderer(config.overlay_mode)
         source = _build_source(config)
-    except (FileNotFoundError, PolicyValidationError, ZoneConfigError, ValueError) as exc:
+    except (FileNotFoundError, PolicyValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     _log_run_started(config, policy.name, len(zones), logger)
     if _should_use_streaming_runtime(config):
-        return _run_streaming_mode(config, policy, zones, source, renderer, logger)
-    return _run_sequential_mode(config, policy, zones, source, renderer, logger)
+        return _run_streaming_mode(config, policy, zones, trigger_engine, source, renderer, logger)
+    return _run_sequential_mode(config, policy, zones, trigger_engine, source, renderer, logger)
 
 
 if __name__ == "__main__":

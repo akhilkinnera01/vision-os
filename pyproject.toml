@@ -42,6 +42,8 @@ include = [
   "ui.*",
   "runtime",
   "runtime.*",
+  "integrations",
+  "integrations.*",
   "state",
   "state.*",
   "tracking",

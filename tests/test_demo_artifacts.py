@@ -53,3 +53,12 @@ def test_demo_zone_config_exists_and_has_zones() -> None:
     assert zone_path.is_file()
     assert isinstance(payload, dict)
     assert len(payload["zones"]) >= 2
+
+
+def test_demo_trigger_config_exists_and_has_rules() -> None:
+    trigger_path = DEMO_DIR / "sample-triggers.yaml"
+    payload = yaml.safe_load(trigger_path.read_text(encoding="utf-8"))
+
+    assert trigger_path.is_file()
+    assert isinstance(payload, dict)
+    assert len(payload["triggers"]) >= 2
