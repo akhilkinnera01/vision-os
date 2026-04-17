@@ -55,6 +55,14 @@ class ExplanationEngine:
             f"Confidence reason: {scene_context.confidence_reason}",
             f"Temporal notes: {', '.join(temporal_state.notes) if temporal_state.notes else 'none'}",
             (
+                "History: "
+                f"window={temporal_state.window_span_seconds:.1f}s, "
+                "dominant="
+                f"{temporal_state.dominant_label.value if temporal_state.dominant_label is not None else 'none'}, "
+                f"focus_duration={decision.scene_metrics.focus_duration_seconds:.1f}s, "
+                f"switches={temporal_state.label_switch_count}"
+            ),
+            (
                 "Scores: "
                 f"focus={scores['focus']:.2f}, distraction={scores['distraction']:.2f}, "
                 f"collaboration={scores['collaboration']:.2f}, stability={scores['stability']:.2f}"
