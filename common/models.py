@@ -268,6 +268,7 @@ class Explanation:
     debug_lines: list[str]
     scores: dict[str, float]
     recent_events: list[str] = field(default_factory=list)
+    recent_triggers: list[str] = field(default_factory=list)
     zone_summaries: list[str] = field(default_factory=list)
 
 
@@ -318,6 +319,7 @@ class ReplayRecord:
     source_mode: SourceMode
     events: list[VisionEvent] = field(default_factory=list)
     zone_states: list[dict[str, object]] = field(default_factory=list)
+    trigger_records: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -328,6 +330,7 @@ class ReplayRecord:
             "source_mode": self.source_mode.value,
             "events": [event.to_dict() for event in self.events],
             "zone_states": self.zone_states,
+            "trigger_records": self.trigger_records,
         }
 
     @classmethod
@@ -340,4 +343,5 @@ class ReplayRecord:
             source_mode=SourceMode(str(payload["source_mode"])),
             events=[VisionEvent.from_dict(item) for item in payload.get("events", [])],
             zone_states=[dict(item) for item in payload.get("zone_states", [])],
+            trigger_records=[dict(item) for item in payload.get("trigger_records", [])],
         )

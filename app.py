@@ -13,7 +13,7 @@ import cv2
 from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
 from common.policy import PolicyValidationError, load_policy
-from integrations import IntegrationConfigError, TriggerEngine, load_trigger_config
+from integrations import IntegrationConfigError, load_trigger_config
 from runtime.benchmark import BenchmarkTracker
 from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
@@ -185,7 +185,7 @@ def _should_use_streaming_runtime(config: VisionOSConfig) -> bool:
     return config.source_mode == SourceMode.WEBCAM
 
 
-def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_engine, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path, camera=config.camera_index)
@@ -206,7 +206,13 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_engine, s
     stop_event = threading.Event()
 
     def inference_worker() -> None:
-        pipeline = VisionPipeline(config, policy=policy, zones=tuple(zones), benchmark_tracker=benchmark_tracker)
+        pipeline = VisionPipeline(
+            config,
+            policy=policy,
+            zones=tuple(zones),
+            trigger_config=trigger_config,
+            benchmark_tracker=benchmark_tracker,
+        )
         while not stop_event.is_set():
             try:
                 packet = frame_queue.get(timeout=0.1)
@@ -214,8 +220,6 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_engine, s
                 continue
             try:
                 output = pipeline.process(packet)
-                if trigger_engine is not None:
-                    trigger_engine.dispatch(output.events)
                 if recorder is not None:
                     recorder.write(
                         frame_index=packet.frame_index,
@@ -224,6 +228,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_engine, s
                         detections=output.detections,
                         events=output.events,
                         zone_states=output.zone_states,
+                        trigger_records=output.trigger_records,
                     )
                 _queue_latest(result_queue, output)
             except Exception as exc:  # pragma: no cover - exercised in runtime
@@ -283,7 +288,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_engine, s
     return _finalize_run(config, benchmark_tracker, logger)
 
 
-def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_engine, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
+def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
     """Run video or replay modes deterministically without dropping frames."""
     if not source.is_opened():
         logger.log("source_open_failed", mode=config.source_mode.value, input_path=config.input_path)
@@ -297,7 +302,13 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_engine, 
         if config.record_path and config.source_mode != SourceMode.REPLAY
         else None
     )
-    pipeline = VisionPipeline(config, policy=policy, zones=tuple(zones), benchmark_tracker=benchmark_tracker)
+    pipeline = VisionPipeline(
+        config,
+        policy=policy,
+        zones=tuple(zones),
+        trigger_config=trigger_config,
+        benchmark_tracker=benchmark_tracker,
+    )
 
     processed_frames = 0
     try:
@@ -306,8 +317,6 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_engine, 
             if packet is None:
                 break
             output = pipeline.process(packet)
-            if trigger_engine is not None:
-                trigger_engine.dispatch(output.events)
             if recorder is not None:
                 recorder.write(
                     frame_index=packet.frame_index,
@@ -316,6 +325,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_engine, 
                     detections=output.detections,
                     events=output.events,
                     zone_states=output.zone_states,
+                    trigger_records=output.trigger_records,
                 )
             processed_frames += 1
 
@@ -353,7 +363,6 @@ def main() -> int:
         zones = load_zones(config.zones_path) if config.zones_path else ()
         trigger_config = load_trigger_config(config.trigger_path) if config.trigger_path else None
         logger = VisionLogger(config.log_json)
-        trigger_engine = TriggerEngine(trigger_config, logger=logger) if trigger_config is not None else None
         renderer = FrameRenderer(config.overlay_mode)
         source = _build_source(config)
     except (FileNotFoundError, PolicyValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
@@ -362,8 +371,8 @@ def main() -> int:
 
     _log_run_started(config, policy.name, len(zones), logger)
     if _should_use_streaming_runtime(config):
-        return _run_streaming_mode(config, policy, zones, trigger_engine, source, renderer, logger)
-    return _run_sequential_mode(config, policy, zones, trigger_engine, source, renderer, logger)
+        return _run_streaming_mode(config, policy, zones, trigger_config, source, renderer, logger)
+    return _run_sequential_mode(config, policy, zones, trigger_config, source, renderer, logger)
 
 
 if __name__ == "__main__":

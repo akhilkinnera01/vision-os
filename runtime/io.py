@@ -33,6 +33,7 @@ class FramePacket:
     replay_detections: list[Detection] | None = None
     replay_events: list[VisionEvent] | None = None
     replay_zone_states: list[dict[str, object]] | None = None
+    replay_trigger_records: list[dict[str, object]] | None = None
 
 
 class WebcamFrameSource:
@@ -117,6 +118,7 @@ class ReplayFrameSource:
             replay_detections=record.detections,
             replay_events=record.events,
             replay_zone_states=record.zone_states,
+            replay_trigger_records=record.trigger_records,
         )
 
     def is_opened(self) -> bool:
@@ -143,6 +145,7 @@ class ReplayRecorder:
         detections: list[Detection],
         events: list[VisionEvent] | None = None,
         zone_states: tuple["ZoneRuntimeState", ...] | None = None,
+        trigger_records: tuple[dict[str, object], ...] | tuple[object, ...] | None = None,
     ) -> None:
         record = ReplayRecord(
             frame_index=frame_index,
@@ -152,6 +155,10 @@ class ReplayRecorder:
             source_mode=self._source_mode,
             events=events or [],
             zone_states=[zone_state.to_dict() for zone_state in zone_states or ()],
+            trigger_records=[
+                item if isinstance(item, dict) else item.to_dict()
+                for item in (trigger_records or ())
+            ],
         )
         self._file.write(json.dumps(record.to_dict()) + "\n")
         self._file.flush()

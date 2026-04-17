@@ -1,14 +1,11 @@
-"""Dispatch matched events to log, webhook, and MQTT outputs."""
+"""Stateful trigger evaluation over runtime snapshots."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from urllib.request import Request, urlopen
-
-from common.models import VisionEvent
+from common.models import ContextLabel, Decision, SceneMetrics, TemporalState, VisionEvent
 from integrations.config import TriggerConfig, TriggerRule
-from integrations.mqtt import publish_json
+from integrations.dispatcher import TriggerDispatcher
+from integrations.models import TriggerRuleState, TriggerSnapshot, TriggeredActionRecord
 from telemetry.logging import VisionLogger
 
 
@@ -18,56 +15,151 @@ class TriggerEngine:
     def __init__(self, config: TriggerConfig, logger: VisionLogger | None = None) -> None:
         self.config = config
         self.logger = logger
-
-    def dispatch(self, events: list[VisionEvent]) -> None:
-        for event in events:
-            for rule in self.config.rules:
-                if not self._matches(rule, event):
-                    continue
-                payload = json.dumps(self._event_payload(rule, event)).encode("utf-8")
-                self._run_outputs(rule, payload)
-
-    def _matches(self, rule: TriggerRule, event: VisionEvent) -> bool:
-        if event.event_type != rule.event_type:
-            return False
-        if rule.zone_id is not None and event.metadata.get("zone_id") != rule.zone_id:
-            return False
-        return True
-
-    def _event_payload(self, rule: TriggerRule, event: VisionEvent) -> dict[str, object]:
-        return {
-            "trigger_id": rule.rule_id,
-            "event": event.to_dict(),
+        self.dispatcher = TriggerDispatcher(logger=logger)
+        self._rule_states: dict[str, TriggerRuleState] = {
+            rule.rule_id: TriggerRuleState() for rule in self.config.rules
         }
 
-    def _run_outputs(self, rule: TriggerRule, payload: bytes) -> None:
-        if rule.log_path:
-            self._write_log(rule.log_path, payload)
-        if rule.webhook_url:
-            self._post_webhook(rule.webhook_url, payload)
-        if rule.mqtt_host and rule.mqtt_topic:
-            self._publish_mqtt(rule.mqtt_host, rule.mqtt_port, rule.mqtt_topic, payload)
+    def evaluate(self, snapshot: TriggerSnapshot) -> tuple[TriggeredActionRecord, ...]:
+        records: list[TriggeredActionRecord] = []
+        for rule in self.config.rules:
+            if not rule.enabled or rule.condition is None:
+                continue
+            state = self._rule_states.setdefault(rule.rule_id, TriggerRuleState())
+            matched, matching_event = self._condition_result(rule, snapshot)
+            if rule.condition.source.startswith("event."):
+                if matched and self._cooldown_ready(rule, state, snapshot.timestamp):
+                    records.extend(
+                        self.dispatcher.dispatch(
+                            rule,
+                            timestamp=snapshot.timestamp,
+                            payload=self._event_payload(rule, snapshot, matching_event),
+                        )
+                    )
+                    state.last_fired_at = snapshot.timestamp
+                    state.fire_count += 1
+                continue
 
-    def _write_log(self, path: str, payload: bytes) -> None:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("ab") as handle:
-            handle.write(payload + b"\n")
+            if matched:
+                if not state.condition_was_true:
+                    state.satisfied_since = snapshot.timestamp
+                    state.condition_was_true = True
+                satisfied_since = state.satisfied_since if state.satisfied_since is not None else snapshot.timestamp
+                duration = snapshot.timestamp - satisfied_since
+                duration_ok = duration >= rule.condition.min_duration_seconds
+                repeat_ready = (
+                    rule.repeat_interval_seconds is not None
+                    and state.last_fired_at is not None
+                    and (snapshot.timestamp - state.last_fired_at) >= rule.repeat_interval_seconds
+                )
+                if (
+                    state.armed
+                    and (not state.fired_in_current_streak or repeat_ready)
+                    and duration_ok
+                    and self._cooldown_ready(rule, state, snapshot.timestamp)
+                ):
+                    records.extend(
+                        self.dispatcher.dispatch(
+                            rule,
+                            timestamp=snapshot.timestamp,
+                            payload=self._event_payload(rule, snapshot, matching_event),
+                        )
+                    )
+                    state.last_fired_at = snapshot.timestamp
+                    state.fire_count += 1
+                    state.fired_in_current_streak = True
+                    if not rule.rearm_on_clear:
+                        state.armed = False
+                continue
 
-    def _post_webhook(self, url: str, payload: bytes) -> None:
-        request = Request(url=url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        try:
-            with urlopen(request, timeout=2.0):
-                pass
-        except Exception as exc:  # pragma: no cover - exercised via tests with mocking
-            self._log_failure("webhook", url, exc)
+            state.condition_was_true = False
+            state.satisfied_since = None
+            state.fired_in_current_streak = False
+            if rule.rearm_on_clear:
+                state.armed = True
 
-    def _publish_mqtt(self, host: str, port: int, topic: str, payload: bytes) -> None:
-        try:
-            publish_json(host, port, topic, payload)
-        except Exception as exc:  # pragma: no cover - exercised via tests with mocking
-            self._log_failure("mqtt", f"{host}:{port}/{topic}", exc)
+        return tuple(records)
 
-    def _log_failure(self, sink: str, target: str, exc: Exception) -> None:
-        if self.logger is not None:
-            self.logger.log("trigger_dispatch_failed", sink=sink, target=target, error=str(exc))
+    def dispatch(self, events: list[VisionEvent]) -> None:
+        snapshot = TriggerSnapshot(
+            timestamp=events[0].timestamp if events else 0.0,
+            decision=Decision(
+                label=ContextLabel.CASUAL_USE,
+                confidence=0.0,
+                action="observe",
+                scene_metrics=SceneMetrics(),
+            ),
+            temporal_state=TemporalState(),
+            events=tuple(events),
+            zone_states=(),
+        )
+        self.evaluate(snapshot)
+
+    def _cooldown_ready(self, rule: TriggerRule, state: TriggerRuleState, timestamp: float) -> bool:
+        if state.last_fired_at is None:
+            return True
+        return (timestamp - state.last_fired_at) >= rule.cooldown_seconds
+
+    def _condition_result(self, rule: TriggerRule, snapshot: TriggerSnapshot) -> tuple[bool, VisionEvent | None]:
+        condition = rule.condition
+        if condition is None:
+            return False, None
+        if condition.source == "decision.label":
+            actual = snapshot.decision.label.value
+            return self._compare(actual, condition.operator, condition.value), None
+        if condition.source == "decision.confidence":
+            actual = snapshot.decision.confidence
+            return self._compare(actual, condition.operator, condition.value), None
+        if condition.source.startswith("temporal.metrics."):
+            metric_name = condition.source.removeprefix("temporal.metrics.")
+            actual = getattr(snapshot.temporal_state.metrics, metric_name)
+            return self._compare(actual, condition.operator, condition.value), None
+        if condition.source == "event.event_type":
+            for event in snapshot.events:
+                if not self._compare(event.event_type, condition.operator, condition.value):
+                    continue
+                if any(event.metadata.get(key) != value for key, value in condition.event_metadata_filters.items()):
+                    continue
+                return True, event
+            return False, None
+        if condition.source.startswith("event.metadata."):
+            metadata_key = condition.source.removeprefix("event.metadata.")
+            for event in snapshot.events:
+                actual = event.metadata.get(metadata_key)
+                if not self._compare(actual, condition.operator, condition.value):
+                    continue
+                if any(event.metadata.get(key) != value for key, value in condition.event_metadata_filters.items()):
+                    continue
+                return True, event
+            return False, None
+        raise ValueError(f"Unsupported trigger condition source: {condition.source}")
+
+    def _compare(self, actual: object, operator: str, expected: object) -> bool:
+        if operator == "equals":
+            return actual == expected
+        if operator == "not_equals":
+            return actual != expected
+        if operator == "gte":
+            return float(actual) >= float(expected)
+        if operator == "gt":
+            return float(actual) > float(expected)
+        if operator == "lte":
+            return float(actual) <= float(expected)
+        if operator == "lt":
+            return float(actual) < float(expected)
+        raise ValueError(f"Unsupported trigger operator: {operator}")
+
+    def _event_payload(self, rule: TriggerRule, snapshot: TriggerSnapshot, event: VisionEvent | None) -> dict[str, object]:
+        return {
+            "trigger_id": rule.rule_id,
+            "timestamp": snapshot.timestamp,
+            "label": snapshot.decision.label.value,
+            "confidence": snapshot.decision.confidence,
+            "metrics": {
+                "focus": snapshot.decision.scene_metrics.focus_score,
+                "distraction": snapshot.decision.scene_metrics.distraction_score,
+                "collaboration": snapshot.decision.scene_metrics.collaboration_score,
+                "stability": snapshot.decision.scene_metrics.stability_score,
+            },
+            "event": None if event is None else event.to_dict(),
+        }

@@ -8,6 +8,8 @@ from pathlib import Path
 import cv2
 import yaml
 
+from integrations import load_trigger_config
+
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "demo"
 
@@ -58,7 +60,10 @@ def test_demo_zone_config_exists_and_has_zones() -> None:
 def test_demo_trigger_config_exists_and_has_rules() -> None:
     trigger_path = DEMO_DIR / "sample-triggers.yaml"
     payload = yaml.safe_load(trigger_path.read_text(encoding="utf-8"))
+    config = load_trigger_config(str(trigger_path))
 
     assert trigger_path.is_file()
     assert isinstance(payload, dict)
     assert len(payload["triggers"]) >= 2
+    assert len(config.rules) >= 2
+    assert any(rule.condition and rule.condition.source == "decision.label" for rule in config.rules)

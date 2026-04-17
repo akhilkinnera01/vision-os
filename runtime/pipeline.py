@@ -20,6 +20,8 @@ from decision.engine import DecisionEngine
 from events.emitter import EventEmitter
 from explain.explain import ExplanationEngine
 from features.builder import FeatureBuilder
+from integrations import TriggerConfig, TriggerEngine, TriggeredActionRecord
+from integrations.models import TriggerSnapshot
 from perception.detector import YOLODetector
 from runtime.benchmark import BenchmarkTracker
 from runtime.io import FramePacket
@@ -50,6 +52,7 @@ class InferenceOutput:
     events: list[VisionEvent]
     actor_frame_state: ActorFrameState
     zone_states: tuple[ZoneRuntimeState, ...] = ()
+    trigger_records: tuple[TriggeredActionRecord, ...] = ()
 
 
 class VisionPipeline:
@@ -60,6 +63,7 @@ class VisionPipeline:
         config: VisionOSConfig,
         policy: VisionPolicy,
         zones: tuple[Zone, ...] = (),
+        trigger_config: TriggerConfig | None = None,
         detector: YOLODetector | None = None,
         benchmark_tracker: BenchmarkTracker | None = None,
     ) -> None:
@@ -76,6 +80,7 @@ class VisionPipeline:
         self.event_emitter = EventEmitter(policy.events)
         self.explanation_engine = ExplanationEngine()
         self.benchmark_tracker = benchmark_tracker or BenchmarkTracker()
+        self.trigger_engine = TriggerEngine(trigger_config) if trigger_config is not None else None
         self.zone_assigner = ZoneAssigner() if zones else None
         self.zone_feature_builder = ZoneFeatureBuilder(self.feature_builder) if zones else None
         self.zone_rules_engine = ZoneRulesEngine() if zones else None
@@ -183,6 +188,19 @@ class VisionPipeline:
                 zone_states=zone_states,
             )
 
+        trigger_records: tuple[TriggeredActionRecord, ...] = ()
+        if self.trigger_engine is not None:
+            with timer.measure("trigger"):
+                trigger_records = self.trigger_engine.evaluate(
+                    TriggerSnapshot(
+                        timestamp=packet.timestamp,
+                        decision=decision,
+                        temporal_state=temporal_state,
+                        events=tuple(events),
+                        zone_states=zone_states,
+                    )
+                )
+
         with timer.measure("explain"):
             explanation = self.explanation_engine.explain(
                 decision,
@@ -191,6 +209,7 @@ class VisionPipeline:
                 temporal_state,
                 self.benchmark_tracker.snapshot(),
                 events=events,
+                trigger_records=trigger_records,
                 zone_states=zone_states,
             )
 
@@ -211,4 +230,5 @@ class VisionPipeline:
             events=events,
             actor_frame_state=actor_frame_state,
             zone_states=zone_states,
+            trigger_records=trigger_records,
         )

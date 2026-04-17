@@ -11,6 +11,7 @@ from common.models import (
     TemporalState,
     VisionEvent,
 )
+from integrations import TriggeredActionRecord
 from zones.models import ZoneRuntimeState
 
 
@@ -25,11 +26,13 @@ class ExplanationEngine:
         temporal_state: TemporalState,
         runtime_metrics: RuntimeMetrics,
         events: list[VisionEvent] | None = None,
+        trigger_records: tuple[TriggeredActionRecord, ...] = (),
         zone_states: tuple[ZoneRuntimeState, ...] = (),
     ) -> Explanation:
         """Summarize why the system chose the current scene label."""
         top_signals = list(scene_context.signals[:3]) or ["scene cues are limited"]
         recent_event_types = [event.event_type for event in (events or [])]
+        recent_trigger_ids = [record.trigger_id for record in trigger_records]
         zone_summaries = [
             f"{zone_state.zone_name}={zone_state.context.label.value}"
             for zone_state in zone_states[:4]
@@ -66,6 +69,10 @@ class ExplanationEngine:
                 f"{', '.join(recent_event_types) if recent_event_types else 'none'}"
             ),
             (
+                "Triggers: "
+                f"{', '.join(recent_trigger_ids) if recent_trigger_ids else 'none'}"
+            ),
+            (
                 "Zones: "
                 f"{', '.join(zone_summaries) if zone_summaries else 'none'}"
             ),
@@ -86,5 +93,6 @@ class ExplanationEngine:
             debug_lines=debug_lines,
             scores=scores,
             recent_events=recent_event_types,
+            recent_triggers=recent_trigger_ids,
             zone_summaries=zone_summaries,
         )
