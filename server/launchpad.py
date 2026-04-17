@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from server.editors import IntegrationEditor
+from server.editors import IntegrationEditor, TriggerEditor
 from server.models import WorkspaceManifest
 from server.runtime_host import RuntimeHost
 from server.store import SessionStore, ValidationStore, WorkspaceStore
@@ -54,6 +54,7 @@ class LaunchpadService:
         runtime_host: RuntimeHost | None = None,
         validator: Callable[[WorkspaceManifest], dict[str, object]] | None = None,
         integration_editor: IntegrationEditor | None = None,
+        trigger_editor: TriggerEditor | None = None,
     ) -> None:
         self.workspace_store = workspace_store
         self.session_store = session_store
@@ -61,6 +62,7 @@ class LaunchpadService:
         self.runtime_host = runtime_host
         self.validator = validator
         self.integration_editor = integration_editor or IntegrationEditor(workspace_store)
+        self.trigger_editor = trigger_editor or TriggerEditor(workspace_store)
 
     def build_snapshot(self) -> dict[str, object]:
         workspaces = self.workspace_store.list_workspaces()
@@ -176,3 +178,9 @@ class LaunchpadService:
 
     def save_workspace_integrations(self, workspace_id: str, targets: object) -> dict[str, object]:
         return self.integration_editor.save(workspace_id, targets)
+
+    def load_workspace_triggers(self, workspace_id: str) -> dict[str, object]:
+        return self.trigger_editor.load(workspace_id)
+
+    def save_workspace_triggers(self, workspace_id: str, rules: object) -> dict[str, object]:
+        return self.trigger_editor.save(workspace_id, rules)

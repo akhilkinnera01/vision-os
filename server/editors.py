@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 
 import yaml
 
-from integrations import IntegrationConfig, IntegrationConfigError, IntegrationTarget, load_integration_config
+from integrations import (
+    IntegrationConfig,
+    IntegrationConfigError,
+    IntegrationTarget,
+    TriggerAction,
+    TriggerConfig,
+    TriggerRule,
+    load_integration_config,
+    load_trigger_config,
+)
 from server.models import WorkspaceManifest
 from server.store import WorkspaceStore
 
@@ -24,7 +34,7 @@ class IntegrationEditor:
 
     def load(self, workspace_id: str) -> dict[str, object]:
         workspace = self._require_workspace(workspace_id)
-        path = self._resolve_path(workspace)
+        path = self._load_path(workspace)
         if not path.is_file():
             return self._payload(workspace, path, ())
         config = load_integration_config(str(path))
@@ -32,7 +42,7 @@ class IntegrationEditor:
 
     def save(self, workspace_id: str, targets: object) -> dict[str, object]:
         workspace = self._require_workspace(workspace_id)
-        path = self._resolve_path(workspace)
+        path = self._save_path(workspace)
         config = self._validate_targets(targets, path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(self._serialize_config(config), encoding="utf-8")
@@ -67,13 +77,21 @@ class IntegrationEditor:
             raise KeyError(workspace_id)
         return workspace
 
-    def _resolve_path(self, workspace: WorkspaceManifest) -> Path:
-        if workspace.integrations_path:
-            return Path(workspace.integrations_path).resolve()
-        if workspace.config_path:
-            config_path = Path(workspace.config_path).resolve()
-            return config_path.with_name(_replace_config_suffix(config_path.name, "integrations"))
-        return (self.workspace_store.path.parent / "workspaces" / workspace.workspace_id / "visionos.integrations.yaml").resolve()
+    def _load_path(self, workspace: WorkspaceManifest) -> Path:
+        return _resolve_workspace_editor_load_path(
+            self.workspace_store,
+            workspace,
+            explicit_path=workspace.integrations_path,
+            kind="integrations",
+        )
+
+    def _save_path(self, workspace: WorkspaceManifest) -> Path:
+        return _resolve_workspace_editor_save_path(
+            self.workspace_store,
+            workspace,
+            explicit_path=workspace.integrations_path,
+            kind="integrations",
+        )
 
     def _validate_targets(self, targets: object, path: Path) -> IntegrationConfig:
         if not isinstance(targets, list):
@@ -197,6 +215,277 @@ class IntegrationEditor:
         }
 
 
+class TriggerEditor:
+    """Load and save trigger rules for the browser workspace shell."""
+
+    def __init__(self, workspace_store: WorkspaceStore) -> None:
+        self.workspace_store = workspace_store
+
+    def load(self, workspace_id: str) -> dict[str, object]:
+        workspace = self._require_workspace(workspace_id)
+        path = self._load_path(workspace)
+        if not path.is_file():
+            return self._payload(workspace, path, ())
+        config = load_trigger_config(str(path))
+        return self._payload(workspace, path, config.rules, exists=True)
+
+    def save(self, workspace_id: str, rules: object) -> dict[str, object]:
+        workspace = self._require_workspace(workspace_id)
+        path = self._save_path(workspace)
+        config = self._validate_rules(rules, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._serialize_config(config), encoding="utf-8")
+        if workspace.triggers_path != str(path):
+            self.workspace_store.save_workspace(replace(workspace, triggers_path=str(path)))
+            workspace = self._require_workspace(workspace_id)
+        return {
+            **self._payload(workspace, path, config.rules, exists=True),
+            "saved": True,
+            "summary": f"Saved {len(config.rules)} trigger rule{'s' if len(config.rules) != 1 else ''}.",
+        }
+
+    def _payload(
+        self,
+        workspace: WorkspaceManifest,
+        path: Path,
+        rules: tuple[TriggerRule, ...],
+        *,
+        exists: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "workspace_id": workspace.workspace_id,
+            "path": str(path),
+            "exists": exists,
+            "rule_count": len(rules),
+            "rules": [self._rule_to_editor_item(rule) for rule in rules],
+        }
+
+    def _require_workspace(self, workspace_id: str) -> WorkspaceManifest:
+        workspace = self.workspace_store.get_workspace(workspace_id)
+        if workspace is None:
+            raise KeyError(workspace_id)
+        return workspace
+
+    def _load_path(self, workspace: WorkspaceManifest) -> Path:
+        return _resolve_workspace_editor_load_path(
+            self.workspace_store,
+            workspace,
+            explicit_path=workspace.triggers_path,
+            kind="triggers",
+        )
+
+    def _save_path(self, workspace: WorkspaceManifest) -> Path:
+        return _resolve_workspace_editor_save_path(
+            self.workspace_store,
+            workspace,
+            explicit_path=workspace.triggers_path,
+            kind="triggers",
+        )
+
+    def _validate_rules(self, rules: object, path: Path) -> TriggerConfig:
+        if not isinstance(rules, list):
+            raise WorkspaceEditorError("Trigger editor payload must define a 'rules' list.")
+        serialized_rules = [self._editor_item_to_yaml_rule(item) for item in rules]
+        payload = {"triggers": serialized_rules}
+        temp_path = path.with_name(f".{path.name}.tmp")
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+        try:
+            return load_trigger_config(str(temp_path))
+        except IntegrationConfigError as exc:
+            raise WorkspaceEditorError(str(exc)) from exc
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def _editor_item_to_yaml_rule(self, item: object) -> dict[str, object]:
+        if not isinstance(item, dict):
+            raise WorkspaceEditorError("Trigger rules must be objects.")
+
+        rule_id = _require_editor_string(item.get("id"), "Trigger rule id")
+        source = _require_editor_string(item.get("source"), f"Trigger '{rule_id}' source")
+        operator = _require_editor_string(item.get("operator"), f"Trigger '{rule_id}' operator")
+        value_text = _require_editor_string(item.get("value_text"), f"Trigger '{rule_id}' value")
+        enabled = bool(item.get("enabled", True))
+        min_duration_seconds = _optional_editor_float(item.get("min_duration_seconds"))
+        cooldown_seconds = _optional_editor_float(item.get("cooldown_seconds"))
+        repeat_interval_seconds = _optional_editor_float(item.get("repeat_interval_seconds"))
+        rearm_on_clear = bool(item.get("rearm_on_clear", True))
+        actions = item.get("actions", [])
+        if not isinstance(actions, list):
+            raise WorkspaceEditorError("Trigger actions must be a list.")
+
+        payload: dict[str, object] = {
+            "id": rule_id,
+            "when": {
+                "source": source,
+                "operator": operator,
+                "value": _parse_trigger_value(value_text),
+            },
+            "then": [self._editor_action_to_yaml_action(rule_id, action) for action in actions],
+        }
+        if not enabled:
+            payload["enabled"] = False
+        if min_duration_seconds is not None:
+            payload["when"]["min_duration_seconds"] = min_duration_seconds
+        metadata_filters = _parse_metadata_filters(item.get("event_metadata_filters_text"))
+        if metadata_filters:
+            payload["when"]["event_metadata_filters"] = metadata_filters
+        if cooldown_seconds is not None:
+            payload["cooldown_seconds"] = cooldown_seconds
+        if repeat_interval_seconds is not None:
+            payload["repeat_interval_seconds"] = repeat_interval_seconds
+        if not rearm_on_clear:
+            payload["rearm_on_clear"] = False
+        return payload
+
+    def _editor_action_to_yaml_action(self, rule_id: str, action: object) -> dict[str, object]:
+        if not isinstance(action, dict):
+            raise WorkspaceEditorError(f"Trigger '{rule_id}' actions must be objects.")
+        action_type = _require_editor_string(action.get("type"), f"Trigger '{rule_id}' action type")
+        payload: dict[str, object] = {"type": action_type}
+        destination = _optional_editor_string(action.get("destination"))
+        method = _optional_editor_string(action.get("method"))
+        mqtt_host = _optional_editor_string(action.get("mqtt_host"))
+        mqtt_topic = _optional_editor_string(action.get("mqtt_topic"))
+        mqtt_port = _optional_editor_int(action.get("mqtt_port"))
+
+        if action_type == "file_append":
+            payload["path"] = _require_editor_string(destination, f"Trigger '{rule_id}' file action path")
+        elif action_type == "log":
+            if destination:
+                payload["event"] = destination
+        elif action_type == "webhook":
+            payload["url"] = _require_editor_string(destination, f"Trigger '{rule_id}' webhook url")
+            if method:
+                payload["method"] = method
+        elif action_type == "mqtt_publish":
+            payload["host"] = _require_editor_string(mqtt_host, f"Trigger '{rule_id}' MQTT host")
+            payload["topic"] = _require_editor_string(mqtt_topic, f"Trigger '{rule_id}' MQTT topic")
+            if mqtt_port is not None:
+                payload["port"] = mqtt_port
+        return payload
+
+    def _serialize_config(self, config: TriggerConfig) -> str:
+        payload = {
+            "triggers": [self._serialize_rule(rule) for rule in config.rules],
+        }
+        return yaml.safe_dump(payload, sort_keys=False)
+
+    def _serialize_rule(self, rule: TriggerRule) -> dict[str, object]:
+        assert rule.condition is not None
+        payload: dict[str, object] = {
+            "id": rule.rule_id,
+            "when": {
+                "source": rule.condition.source,
+                "operator": rule.condition.operator,
+                "value": rule.condition.value,
+            },
+            "then": [self._serialize_action(action) for action in rule.actions],
+        }
+        if not rule.enabled:
+            payload["enabled"] = False
+        if rule.condition.min_duration_seconds > 0:
+            payload["when"]["min_duration_seconds"] = rule.condition.min_duration_seconds
+        if rule.condition.event_metadata_filters:
+            payload["when"]["event_metadata_filters"] = dict(rule.condition.event_metadata_filters)
+        if rule.cooldown_seconds > 0:
+            payload["cooldown_seconds"] = rule.cooldown_seconds
+        if rule.repeat_interval_seconds is not None:
+            payload["repeat_interval_seconds"] = rule.repeat_interval_seconds
+        if not rule.rearm_on_clear:
+            payload["rearm_on_clear"] = False
+        return payload
+
+    def _serialize_action(self, action: TriggerAction) -> dict[str, object]:
+        payload: dict[str, object] = {"type": action.action_type}
+        if action.action_type == "file_append" and action.target is not None:
+            payload["path"] = action.target
+        elif action.action_type == "log" and action.target is not None:
+            payload["event"] = action.target
+        elif action.action_type == "webhook" and action.target is not None:
+            payload["url"] = action.target
+            if action.method != "POST":
+                payload["method"] = action.method
+        elif action.action_type == "mqtt_publish":
+            if action.mqtt_host is not None:
+                payload["host"] = action.mqtt_host
+            if action.mqtt_topic is not None:
+                payload["topic"] = action.mqtt_topic
+            if action.mqtt_port != 1883:
+                payload["port"] = action.mqtt_port
+        return payload
+
+    def _rule_to_editor_item(self, rule: TriggerRule) -> dict[str, object]:
+        assert rule.condition is not None
+        return {
+            "id": rule.rule_id,
+            "enabled": rule.enabled,
+            "source": rule.condition.source,
+            "operator": rule.condition.operator,
+            "value_text": _format_trigger_value(rule.condition.value),
+            "min_duration_seconds": rule.condition.min_duration_seconds,
+            "cooldown_seconds": rule.cooldown_seconds,
+            "repeat_interval_seconds": rule.repeat_interval_seconds,
+            "rearm_on_clear": rule.rearm_on_clear,
+            "event_metadata_filters_text": (
+                json.dumps(rule.condition.event_metadata_filters, sort_keys=True)
+                if rule.condition.event_metadata_filters
+                else ""
+            ),
+            "actions": [self._action_to_editor_item(action) for action in rule.actions],
+        }
+
+    def _action_to_editor_item(self, action: TriggerAction) -> dict[str, object]:
+        destination = None
+        if action.action_type in {"file_append", "log", "webhook"}:
+            destination = action.target
+        return {
+            "type": action.action_type,
+            "destination": destination,
+            "method": action.method,
+            "mqtt_host": action.mqtt_host,
+            "mqtt_port": action.mqtt_port,
+            "mqtt_topic": action.mqtt_topic,
+        }
+
+
+def _resolve_workspace_editor_load_path(
+    workspace_store: WorkspaceStore,
+    workspace: WorkspaceManifest,
+    *,
+    explicit_path: str | None,
+    kind: str,
+) -> Path:
+    if explicit_path:
+        return Path(explicit_path).resolve()
+    return _workspace_owned_editor_path(workspace_store, workspace, kind)
+
+
+def _resolve_workspace_editor_save_path(
+    workspace_store: WorkspaceStore,
+    workspace: WorkspaceManifest,
+    *,
+    explicit_path: str | None,
+    kind: str,
+) -> Path:
+    generated_path = _workspace_owned_editor_path(workspace_store, workspace, kind)
+    if explicit_path and Path(explicit_path).resolve() == generated_path:
+        return generated_path
+    return generated_path
+
+
+def _workspace_owned_editor_path(
+    workspace_store: WorkspaceStore,
+    workspace: WorkspaceManifest,
+    kind: str,
+) -> Path:
+    if workspace.config_path:
+        config_path = Path(workspace.config_path).resolve()
+        return config_path.with_name(_replace_config_suffix(config_path.name, kind))
+    return (workspace_store.path.parent / "workspaces" / workspace.workspace_id / f"visionos.{kind}.yaml").resolve()
+
+
 def _replace_config_suffix(filename: str, kind: str) -> str:
     if filename.endswith(".config.yaml"):
         return filename.replace(".config.yaml", f".{kind}.yaml")
@@ -252,3 +541,44 @@ def _coerce_editor_string_list(value: object) -> list[str]:
             raise WorkspaceEditorError("Integration editor list fields must contain non-empty strings.")
         parsed.append(item.strip())
     return parsed
+
+
+def _parse_trigger_value(value: object) -> object:
+    if isinstance(value, bool | int | float | list | dict):
+        return value
+    text = _require_editor_string(value, "Trigger value")
+    lowered = text.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if text.startswith("{") or text.startswith("["):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise WorkspaceEditorError("Trigger values that look like JSON must be valid JSON.") from exc
+    try:
+        if "." in text:
+            return float(text)
+        return int(text)
+    except ValueError:
+        return text
+
+
+def _format_trigger_value(value: object) -> str:
+    if isinstance(value, dict | list):
+        return json.dumps(value, sort_keys=True)
+    return str(value)
+
+
+def _parse_metadata_filters(value: object) -> dict[str, object]:
+    if value in (None, ""):
+        return {}
+    text = _require_editor_string(value, "Trigger metadata filters")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise WorkspaceEditorError("Trigger metadata filters must be valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise WorkspaceEditorError("Trigger metadata filters must decode to an object.")
+    return payload

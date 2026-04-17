@@ -112,6 +112,7 @@ def test_launchpad_app_renders_workspace_shell_page(tmp_path: Path) -> None:
     assert "Integrations" in body
     assert "Validate" in body
     assert "Start + Record" in body
+    assert "Save triggers" in body
     assert "Save integrations" in body
 
 
@@ -391,6 +392,98 @@ def test_launchpad_app_saves_workspace_integrations_payload(tmp_path: Path) -> N
     assert saved_workspace is not None
     assert saved_workspace.integrations_path is not None
     assert Path(saved_workspace.integrations_path).is_file()
+
+
+def test_launchpad_app_returns_workspace_trigger_payload(tmp_path: Path) -> None:
+    triggers_path = tmp_path / "visionos.triggers.yaml"
+    triggers_path.write_text(
+        "\n".join(
+            [
+                "triggers:",
+                "  - id: focus-session",
+                "    when:",
+                "      source: decision.label",
+                "      operator: equals",
+                "      value: Focused Work",
+                "    then:",
+                "      - type: stdout",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+            triggers_path=str(triggers_path),
+        )
+    )
+    app = LaunchpadApp(LaunchpadService(workspace_store, session_store, validation_store))
+
+    status, headers, body = _call_app(app, "/api/workspaces/desk-a/triggers")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert '"rule_count": 1' in body
+    assert '"id": "focus-session"' in body
+
+
+def test_launchpad_app_saves_workspace_trigger_payload(tmp_path: Path) -> None:
+    config_path = tmp_path / "visionos.config.yaml"
+    config_path.write_text("source: video\ninput: demo/sample.mp4\n", encoding="utf-8")
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+            config_path=str(config_path),
+        )
+    )
+    app = LaunchpadApp(LaunchpadService(workspace_store, session_store, validation_store))
+
+    status, headers, body = _call_app(
+        app,
+        "/api/workspaces/desk-a/triggers",
+        method="POST",
+        payload={
+            "rules": [
+                {
+                    "id": "focus-session",
+                    "enabled": True,
+                    "source": "decision.label",
+                    "operator": "equals",
+                    "value_text": "Focused Work",
+                    "min_duration_seconds": 5,
+                    "cooldown_seconds": 15,
+                    "repeat_interval_seconds": None,
+                    "rearm_on_clear": True,
+                    "event_metadata_filters_text": "",
+                    "actions": [
+                        {"type": "stdout"},
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert '"saved": true' in body
+    assert '"rule_count": 1' in body
+    saved_workspace = workspace_store.get_workspace("desk-a")
+    assert saved_workspace is not None
+    assert saved_workspace.triggers_path is not None
+    assert Path(saved_workspace.triggers_path).is_file()
 
 
 def _call_app(

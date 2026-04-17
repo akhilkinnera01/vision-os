@@ -80,6 +80,25 @@ class LaunchpadApp:
             except WorkspaceEditorError as exc:
                 return self._json_error(start_response, "400 Bad Request", str(exc))
             return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/triggers") and method == "GET":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/triggers").rstrip("/"))
+            try:
+                payload = self.service.load_workspace_triggers(workspace_id)
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except WorkspaceEditorError as exc:
+                return self._json_error(start_response, "400 Bad Request", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/triggers") and method == "POST":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/triggers").rstrip("/"))
+            try:
+                request_payload = self._read_json_body(environ)
+                payload = self.service.save_workspace_triggers(workspace_id, request_payload.get("rules", []))
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except WorkspaceEditorError as exc:
+                return self._json_error(start_response, "400 Bad Request", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
         if path == "/api/runtime/stop" and method == "POST":
             try:
                 payload = self.service.stop_workspace()
@@ -336,6 +355,19 @@ def _render_workspace(surface: dict[str, object]) -> str:
             <li>No live session yet.</li>
           </ul>
         </article>
+        <article class="card workspace-triggers">
+          <p class="card-kicker">Trigger builder</p>
+          <h2>Decision and event rules</h2>
+          <p id="trigger-summary">Load a file-backed trigger set for this workspace, then save condition/action rules without dropping back to raw YAML.</p>
+          <p id="trigger-path" class="editor-note">Preparing trigger path...</p>
+          <div id="trigger-rules" class="editor-stack">
+            <p class="editor-empty">No trigger rules loaded yet.</p>
+          </div>
+          <div class="workspace-controls">
+            <button id="add-trigger" type="button">Add trigger</button>
+            <button id="save-triggers" type="button" class="secondary-button">Save triggers</button>
+          </div>
+        </article>
         <article class="card workspace-integrations">
           <p class="card-kicker">Integration builder</p>
           <h2>Dispatch targets</h2>
@@ -367,10 +399,28 @@ def _render_workspace(surface: dict[str, object]) -> str:
         const integrationTargets = document.getElementById("integration-targets");
         const addIntegrationButton = document.getElementById("add-integration");
         const saveIntegrationsButton = document.getElementById("save-integrations");
+        const triggerSummary = document.getElementById("trigger-summary");
+        const triggerPath = document.getElementById("trigger-path");
+        const triggerRules = document.getElementById("trigger-rules");
+        const addTriggerButton = document.getElementById("add-trigger");
+        const saveTriggersButton = document.getElementById("save-triggers");
         const canRecord = {json.dumps(workspace["source_mode"] != "replay")};
         const integrationSources = ["trigger", "event", "status", "session_summary"];
         const integrationTypes = ["log", "stdout", "file_append", "webhook", "mqtt_publish"];
         const webhookMethods = ["POST", "PATCH", "PUT", "DELETE"];
+        const triggerOperators = ["equals", "not_equals", "gte", "gt", "lte", "lt"];
+        const triggerSources = [
+          "decision.label",
+          "decision.confidence",
+          "event.event_type",
+          "event.metadata.zone_id",
+          "event.metadata.zone_label",
+          "temporal.metrics.focus_score",
+          "temporal.metrics.distraction_score",
+          "temporal.metrics.collaboration_score",
+          "temporal.metrics.stability_score",
+        ];
+        const triggerActionTypes = ["stdout", "file_append", "log", "webhook", "mqtt_publish"];
 
         function escapeHtml(value) {{
           return String(value ?? "")
@@ -400,6 +450,22 @@ def _render_workspace(surface: dict[str, object]) -> str:
             event_types: [],
             trigger_ids: [],
             interval_seconds: null,
+          }};
+        }}
+
+        function emptyTriggerRule() {{
+          return {{
+            id: `trigger-${{Date.now()}}`,
+            enabled: true,
+            source: "decision.label",
+            operator: "equals",
+            value_text: "Focused Work",
+            min_duration_seconds: 0,
+            cooldown_seconds: 0,
+            repeat_interval_seconds: null,
+            rearm_on_clear: true,
+            event_metadata_filters_text: "",
+            actions: [{{ type: "stdout", destination: "", method: "POST", mqtt_host: "", mqtt_topic: "", mqtt_port: 1883 }}],
           }};
         }}
 
@@ -466,6 +532,103 @@ def _render_workspace(surface: dict[str, object]) -> str:
           `;
         }}
 
+        function triggerActionMarkup(action) {{
+          return `
+            <div class="trigger-action-card">
+              <div class="integration-card-header">
+                <strong>Action</strong>
+                <button type="button" class="secondary-button compact-button" data-action="remove-trigger-action">Remove action</button>
+              </div>
+              <div class="editor-grid">
+                <label class="editor-field">
+                  <span>Type</span>
+                  <select data-field="type">${{optionMarkup(triggerActionTypes, action.type || "stdout")}}</select>
+                </label>
+                <label class="editor-field" data-group="destination">
+                  <span data-role="destination-label">Destination</span>
+                  <input type="text" data-field="destination" value="${{escapeHtml(action.destination || "")}}">
+                </label>
+                <label class="editor-field" data-group="method">
+                  <span>Method</span>
+                  <select data-field="method">${{optionMarkup(webhookMethods, action.method || "POST")}}</select>
+                </label>
+                <label class="editor-field" data-group="mqtt-host">
+                  <span>MQTT host</span>
+                  <input type="text" data-field="mqtt_host" value="${{escapeHtml(action.mqtt_host || "")}}">
+                </label>
+                <label class="editor-field" data-group="mqtt-topic">
+                  <span>MQTT topic</span>
+                  <input type="text" data-field="mqtt_topic" value="${{escapeHtml(action.mqtt_topic || "")}}">
+                </label>
+                <label class="editor-field" data-group="mqtt-port">
+                  <span>MQTT port</span>
+                  <input type="number" data-field="mqtt_port" min="1" value="${{escapeHtml(action.mqtt_port ?? 1883)}}">
+                </label>
+              </div>
+            </div>
+          `;
+        }}
+
+        function triggerRuleMarkup(rule) {{
+          return `
+            <article class="trigger-card">
+              <div class="integration-card-header">
+                <strong>${{escapeHtml(rule.id || "New trigger")}}</strong>
+                <button type="button" class="secondary-button compact-button" data-action="remove-trigger">Remove trigger</button>
+              </div>
+              <div class="editor-grid">
+                <label class="editor-field">
+                  <span>ID</span>
+                  <input type="text" data-field="id" value="${{escapeHtml(rule.id || "")}}">
+                </label>
+                <label class="editor-field">
+                  <span>Source</span>
+                  <select data-field="source">${{optionMarkup(triggerSources, rule.source || "decision.label")}}</select>
+                </label>
+                <label class="editor-field">
+                  <span>Operator</span>
+                  <select data-field="operator">${{optionMarkup(triggerOperators, rule.operator || "equals")}}</select>
+                </label>
+                <label class="editor-field">
+                  <span>Value</span>
+                  <input type="text" data-field="value_text" value="${{escapeHtml(rule.value_text || "")}}" placeholder="Focused Work or 0.9">
+                </label>
+                <label class="editor-field">
+                  <span>Min duration (seconds)</span>
+                  <input type="number" data-field="min_duration_seconds" min="0" step="0.1" value="${{escapeHtml(rule.min_duration_seconds ?? 0)}}">
+                </label>
+                <label class="editor-field">
+                  <span>Cooldown (seconds)</span>
+                  <input type="number" data-field="cooldown_seconds" min="0" step="0.1" value="${{escapeHtml(rule.cooldown_seconds ?? 0)}}">
+                </label>
+                <label class="editor-field">
+                  <span>Repeat interval (seconds)</span>
+                  <input type="number" data-field="repeat_interval_seconds" min="0" step="0.1" value="${{escapeHtml(rule.repeat_interval_seconds ?? "")}}">
+                </label>
+                <label class="editor-field">
+                  <span>Event metadata filters (JSON)</span>
+                  <input type="text" data-field="event_metadata_filters_text" value="${{escapeHtml(rule.event_metadata_filters_text || "")}}" placeholder='{{"zone_id":"whiteboard"}}'>
+                </label>
+                <label class="editor-field checkbox-field">
+                  <span>Enabled</span>
+                  <input type="checkbox" data-field="enabled"${{rule.enabled === false ? "" : " checked"}}>
+                </label>
+                <label class="editor-field checkbox-field">
+                  <span>Re-arm on clear</span>
+                  <input type="checkbox" data-field="rearm_on_clear"${{rule.rearm_on_clear === false ? "" : " checked"}}>
+                </label>
+              </div>
+              <div class="trigger-action-list">
+                <div class="trigger-action-header">
+                  <p class="card-kicker">Actions</p>
+                  <button type="button" class="secondary-button compact-button" data-action="add-trigger-action">Add action</button>
+                </div>
+                <div data-role="trigger-actions">${{(rule.actions || []).map((action) => triggerActionMarkup(action)).join("")}}</div>
+              </div>
+            </article>
+          `;
+        }}
+
         function syncIntegrationCard(card) {{
           const source = card.querySelector('[data-field="source"]').value;
           const type = card.querySelector('[data-field="type"]').value;
@@ -501,6 +664,39 @@ def _render_workspace(surface: dict[str, object]) -> str:
           title.textContent = idField.value.trim() || "New integration";
         }}
 
+        function syncTriggerAction(card) {{
+          const type = card.querySelector('[data-field="type"]').value;
+          const destinationGroup = card.querySelector('[data-group="destination"]');
+          const destinationLabel = card.querySelector('[data-role="destination-label"]');
+          const methodGroup = card.querySelector('[data-group="method"]');
+          const mqttHostGroup = card.querySelector('[data-group="mqtt-host"]');
+          const mqttTopicGroup = card.querySelector('[data-group="mqtt-topic"]');
+          const mqttPortGroup = card.querySelector('[data-group="mqtt-port"]');
+
+          destinationGroup.classList.toggle("is-hidden", type === "stdout" || type === "mqtt_publish");
+          methodGroup.classList.toggle("is-hidden", type !== "webhook");
+          mqttHostGroup.classList.toggle("is-hidden", type !== "mqtt_publish");
+          mqttTopicGroup.classList.toggle("is-hidden", type !== "mqtt_publish");
+          mqttPortGroup.classList.toggle("is-hidden", type !== "mqtt_publish");
+
+          if (type === "file_append") {{
+            destinationLabel.textContent = "File path";
+          }} else if (type === "webhook") {{
+            destinationLabel.textContent = "Webhook URL";
+          }} else {{
+            destinationLabel.textContent = "Log event";
+          }}
+        }}
+
+        function syncTriggerRule(card) {{
+          const title = card.querySelector(".integration-card-header strong");
+          const idField = card.querySelector('[data-field="id"]');
+          title.textContent = idField.value.trim() || "New trigger";
+          for (const actionCard of card.querySelectorAll(".trigger-action-card")) {{
+            syncTriggerAction(actionCard);
+          }}
+        }}
+
         function renderIntegrationTargets(targets) {{
           if (!targets.length) {{
             integrationTargets.innerHTML = '<p class="editor-empty">No integration targets yet. Add one here and save to create the workspace file.</p>';
@@ -509,6 +705,17 @@ def _render_workspace(surface: dict[str, object]) -> str:
           integrationTargets.innerHTML = targets.map((target) => integrationCardMarkup(target)).join("");
           for (const card of integrationTargets.querySelectorAll(".integration-card")) {{
             syncIntegrationCard(card);
+          }}
+        }}
+
+        function renderTriggerRules(rules) {{
+          if (!rules.length) {{
+            triggerRules.innerHTML = '<p class="editor-empty">No trigger rules yet. Add one here and save to create the workspace file.</p>';
+            return;
+          }}
+          triggerRules.innerHTML = rules.map((rule) => triggerRuleMarkup(rule)).join("");
+          for (const card of triggerRules.querySelectorAll(".trigger-card")) {{
+            syncTriggerRule(card);
           }}
         }}
 
@@ -552,6 +759,88 @@ def _render_workspace(surface: dict[str, object]) -> str:
             }}
             return target;
           }});
+        }}
+
+        function collectTriggerRules() {{
+          return [...triggerRules.querySelectorAll(".trigger-card")].map((card) => {{
+            const actions = [...card.querySelectorAll(".trigger-action-card")].map((actionCard) => {{
+              const action = {{
+                type: actionCard.querySelector('[data-field="type"]').value,
+                destination: actionCard.querySelector('[data-field="destination"]').value.trim(),
+                method: actionCard.querySelector('[data-field="method"]').value,
+                mqtt_host: actionCard.querySelector('[data-field="mqtt_host"]').value.trim(),
+                mqtt_topic: actionCard.querySelector('[data-field="mqtt_topic"]').value.trim(),
+                mqtt_port: actionCard.querySelector('[data-field="mqtt_port"]').value.trim(),
+              }};
+              if (!action.destination) {{
+                delete action.destination;
+              }}
+              if (!action.mqtt_host) {{
+                delete action.mqtt_host;
+              }}
+              if (!action.mqtt_topic) {{
+                delete action.mqtt_topic;
+              }}
+              if (!action.mqtt_port) {{
+                delete action.mqtt_port;
+              }}
+              return action;
+            }});
+            const rule = {{
+              id: card.querySelector('[data-field="id"]').value.trim(),
+              enabled: card.querySelector('[data-field="enabled"]').checked,
+              source: card.querySelector('[data-field="source"]').value,
+              operator: card.querySelector('[data-field="operator"]').value,
+              value_text: card.querySelector('[data-field="value_text"]').value.trim(),
+              min_duration_seconds: card.querySelector('[data-field="min_duration_seconds"]').value.trim(),
+              cooldown_seconds: card.querySelector('[data-field="cooldown_seconds"]').value.trim(),
+              repeat_interval_seconds: card.querySelector('[data-field="repeat_interval_seconds"]').value.trim(),
+              rearm_on_clear: card.querySelector('[data-field="rearm_on_clear"]').checked,
+              event_metadata_filters_text: card.querySelector('[data-field="event_metadata_filters_text"]').value.trim(),
+              actions,
+            }};
+            if (!rule.min_duration_seconds) {{
+              rule.min_duration_seconds = null;
+            }}
+            if (!rule.cooldown_seconds) {{
+              rule.cooldown_seconds = null;
+            }}
+            if (!rule.repeat_interval_seconds) {{
+              rule.repeat_interval_seconds = null;
+            }}
+            return rule;
+          }});
+        }}
+
+        async function loadTriggers() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/triggers`, {{ cache: "no-store" }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            triggerSummary.textContent = payload.error || "Unable to load trigger rules.";
+            triggerRules.innerHTML = '<p class="editor-empty">No trigger rules available.</p>';
+            return;
+          }}
+          triggerSummary.textContent = payload.exists
+            ? `Editing ${{payload.rule_count}} trigger rule${{payload.rule_count === 1 ? "" : "s"}} for this workspace.`
+            : "No triggers file exists yet. Save here to create one for this workspace.";
+          triggerPath.textContent = `Path: ${{payload.path}}`;
+          renderTriggerRules(payload.rules || []);
+        }}
+
+        async function saveTriggers() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/triggers`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ rules: collectTriggerRules() }}),
+          }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            triggerSummary.textContent = payload.error || "Unable to save trigger rules.";
+            return;
+          }}
+          triggerSummary.textContent = payload.summary;
+          triggerPath.textContent = `Path: ${{payload.path}}`;
+          renderTriggerRules(payload.rules || []);
         }}
 
         async function loadIntegrations() {{
@@ -658,6 +947,13 @@ def _render_workspace(surface: dict[str, object]) -> str:
           renderIntegrationTargets(nextTargets);
         }});
         saveIntegrationsButton.addEventListener("click", saveIntegrations);
+        addTriggerButton.addEventListener("click", () => {{
+          const existing = triggerRules.querySelectorAll(".trigger-card");
+          const nextRules = existing.length ? collectTriggerRules() : [];
+          nextRules.push(emptyTriggerRule());
+          renderTriggerRules(nextRules);
+        }});
+        saveTriggersButton.addEventListener("click", saveTriggers);
         integrationTargets.addEventListener("click", (event) => {{
           const actionTarget = event.target.closest("[data-action='remove-integration']");
           if (!actionTarget) {{
@@ -672,10 +968,48 @@ def _render_workspace(surface: dict[str, object]) -> str:
             integrationTargets.innerHTML = '<p class="editor-empty">No integration targets yet. Add one here and save to create the workspace file.</p>';
           }}
         }});
+        triggerRules.addEventListener("click", (event) => {{
+          const removeTrigger = event.target.closest("[data-action='remove-trigger']");
+          if (removeTrigger) {{
+            const card = removeTrigger.closest(".trigger-card");
+            if (card) {{
+              card.remove();
+            }}
+            if (!triggerRules.querySelector(".trigger-card")) {{
+              triggerRules.innerHTML = '<p class="editor-empty">No trigger rules yet. Add one here and save to create the workspace file.</p>';
+            }}
+            return;
+          }}
+          const addAction = event.target.closest("[data-action='add-trigger-action']");
+          if (addAction) {{
+            const ruleCard = addAction.closest(".trigger-card");
+            const actionList = ruleCard.querySelector('[data-role="trigger-actions"]');
+            actionList.insertAdjacentHTML("beforeend", triggerActionMarkup({{ type: "stdout", destination: "", method: "POST", mqtt_host: "", mqtt_topic: "", mqtt_port: 1883 }}));
+            syncTriggerRule(ruleCard);
+            return;
+          }}
+          const removeAction = event.target.closest("[data-action='remove-trigger-action']");
+          if (removeAction) {{
+            const actionCard = removeAction.closest(".trigger-action-card");
+            if (actionCard) {{
+              actionCard.remove();
+            }}
+          }}
+        }});
         integrationTargets.addEventListener("change", (event) => {{
           const card = event.target.closest(".integration-card");
           if (card) {{
             syncIntegrationCard(card);
+          }}
+        }});
+        triggerRules.addEventListener("change", (event) => {{
+          const actionCard = event.target.closest(".trigger-action-card");
+          if (actionCard) {{
+            syncTriggerAction(actionCard);
+          }}
+          const ruleCard = event.target.closest(".trigger-card");
+          if (ruleCard) {{
+            syncTriggerRule(ruleCard);
           }}
         }});
         integrationTargets.addEventListener("input", (event) => {{
@@ -684,7 +1018,14 @@ def _render_workspace(surface: dict[str, object]) -> str:
             syncIntegrationCard(card);
           }}
         }});
+        triggerRules.addEventListener("input", (event) => {{
+          const ruleCard = event.target.closest(".trigger-card");
+          if (ruleCard && event.target.matches('[data-field="id"]')) {{
+            syncTriggerRule(ruleCard);
+          }}
+        }});
         refreshWorkspace();
+        loadTriggers();
         loadIntegrations();
         window.setInterval(refreshWorkspace, 1500);
       </script>
@@ -859,10 +1200,12 @@ def _base_document(title: str, content: str) -> str:
       .workspace-status,
       .workspace-events,
       .workspace-tabs,
+      .workspace-triggers,
       .workspace-integrations {{
         min-height: 240px;
       }}
 
+      .workspace-triggers,
       .workspace-integrations {{
         grid-column: 1 / -1;
       }}
@@ -939,12 +1282,37 @@ def _base_document(title: str, content: str) -> str:
         background: rgba(255, 255, 255, 0.48);
       }}
 
+      .trigger-card,
+      .trigger-action-card {{
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.48);
+      }}
+
       .integration-card-header {{
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 0.75rem;
         margin-bottom: 0.85rem;
+      }}
+
+      .trigger-action-list {{
+        margin-top: 1rem;
+        display: grid;
+        gap: 0.85rem;
+      }}
+
+      .trigger-action-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }}
+
+      .trigger-action-header .card-kicker {{
+        margin: 0;
       }}
 
       .editor-grid {{
