@@ -40,6 +40,7 @@ def test_collect_runtime_hints_reports_missing_optional_assets() -> None:
 
 def test_format_startup_summary_renders_runtime_overview() -> None:
     config = VisionOSConfig(
+        config_path="demo/demo-setup-config.yaml",
         source_mode=SourceMode.REPLAY,
         input_path="demo/demo-replay.jsonl",
         profile_name="meeting_room",
@@ -58,6 +59,7 @@ def test_format_startup_summary_renders_runtime_overview() -> None:
     )
 
     assert "Startup summary" in output
+    assert "Config: demo/demo-setup-config.yaml" in output
     assert "Source: replay(demo/demo-replay.jsonl)" in output
     assert "Profile: meeting_room" in output
     assert "Policy: office" in output

@@ -26,6 +26,7 @@ def format_startup_summary(
     """Render a human-readable runtime overview before the main loop starts."""
     lines = [
         "Startup summary",
+        f"Config: {config.config_path or 'ad hoc CLI args'}",
         f"Source: {_describe_source(config)}",
         f"Profile: {profile_id or 'none'}",
         f"Policy: {policy_name}",
