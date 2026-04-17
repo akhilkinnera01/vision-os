@@ -23,6 +23,7 @@ from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, Webc
 from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
+from setupux.config_file import SetupConfigError, load_runtime_config_file
 from zones import ZoneConfigError, load_zones, select_zones_for_profile
 
 
@@ -30,6 +31,7 @@ def parse_args() -> VisionOSConfig:
     """Parse CLI arguments into a runtime config object."""
     parser = argparse.ArgumentParser(description="Run Vision OS on a webcam, video, or replay feed.")
     argv = sys.argv[1:]
+    parser.add_argument("--config", help="Optional path to a saved Vision OS runtime config YAML file.")
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
@@ -74,38 +76,51 @@ def parse_args() -> VisionOSConfig:
     parser.add_argument("--log-json", action="store_true", help="Emit structured JSON logs to stderr.")
     args = parser.parse_args()
 
-    source_mode = SourceMode(args.source)
+    config_from_file = load_runtime_config_file(args.config) if args.config else VisionOSConfig()
+
+    source_mode = SourceMode(args.source) if "--source" in argv else config_from_file.source_mode
+    input_path = args.input if "--input" in argv else config_from_file.input_path
     if source_mode in {SourceMode.VIDEO, SourceMode.REPLAY} and not args.input:
-        parser.error("--input is required for video and replay modes.")
+        if input_path is None:
+            parser.error("--input is required for video and replay modes.")
 
     return VisionOSConfig(
-        camera_index=args.camera,
-        model_name=args.model,
-        confidence_threshold=args.conf,
-        image_size=args.imgsz,
-        device=args.device,
-        max_detections=args.max_detections,
+        config_path=args.config if args.config else config_from_file.config_path,
+        camera_index=args.camera if "--camera" in argv else config_from_file.camera_index,
+        model_name=args.model if "--model" in argv else config_from_file.model_name,
+        confidence_threshold=args.conf if "--conf" in argv else config_from_file.confidence_threshold,
+        image_size=args.imgsz if "--imgsz" in argv else config_from_file.image_size,
+        device=args.device if "--device" in argv else config_from_file.device,
+        max_detections=args.max_detections if "--max-detections" in argv else config_from_file.max_detections,
         source_mode=source_mode,
-        input_path=args.input,
-        profile_name=args.profile,
-        profile_path=args.profile_file,
-        zones_path=args.zones_file,
-        trigger_path=args.trigger_file,
-        record_path=args.record,
-        benchmark_output_path=args.benchmark_output,
-        history_output_path=args.history_output,
-        session_summary_output_path=args.session_summary_output,
-        policy_name=args.policy,
-        policy_path=args.policy_file,
-        overlay_mode=OverlayMode(args.overlay_mode),
-        temporal_window_seconds=args.temporal_window,
-        max_frames=args.max_frames,
-        headless=args.headless,
-        log_json=args.log_json,
-        policy_explicit=("--policy" in argv) or ("--policy-file" in argv),
-        zones_explicit="--zones-file" in argv,
-        trigger_explicit="--trigger-file" in argv,
-        overlay_mode_explicit="--overlay-mode" in argv,
+        input_path=input_path,
+        profile_name=args.profile if "--profile" in argv else config_from_file.profile_name,
+        profile_path=args.profile_file if "--profile-file" in argv else config_from_file.profile_path,
+        zones_path=args.zones_file if "--zones-file" in argv else config_from_file.zones_path,
+        trigger_path=args.trigger_file if "--trigger-file" in argv else config_from_file.trigger_path,
+        record_path=args.record if "--record" in argv else config_from_file.record_path,
+        benchmark_output_path=(
+            args.benchmark_output if "--benchmark-output" in argv else config_from_file.benchmark_output_path
+        ),
+        history_output_path=args.history_output if "--history-output" in argv else config_from_file.history_output_path,
+        session_summary_output_path=(
+            args.session_summary_output
+            if "--session-summary-output" in argv
+            else config_from_file.session_summary_output_path
+        ),
+        policy_name=args.policy if "--policy" in argv else config_from_file.policy_name,
+        policy_path=args.policy_file if "--policy-file" in argv else config_from_file.policy_path,
+        overlay_mode=OverlayMode(args.overlay_mode) if "--overlay-mode" in argv else config_from_file.overlay_mode,
+        temporal_window_seconds=(
+            args.temporal_window if "--temporal-window" in argv else config_from_file.temporal_window_seconds
+        ),
+        max_frames=args.max_frames if "--max-frames" in argv else config_from_file.max_frames,
+        headless=args.headless if "--headless" in argv else config_from_file.headless,
+        log_json=args.log_json if "--log-json" in argv else config_from_file.log_json,
+        policy_explicit=(("--policy" in argv) or ("--policy-file" in argv)) or config_from_file.policy_explicit,
+        zones_explicit=("--zones-file" in argv) or config_from_file.zones_explicit,
+        trigger_explicit=("--trigger-file" in argv) or config_from_file.trigger_explicit,
+        overlay_mode_explicit=("--overlay-mode" in argv) or config_from_file.overlay_mode_explicit,
     )
 
 
@@ -466,7 +481,15 @@ def main() -> int:
             presentation=None if profile is None else profile.presentation,
         )
         source = _build_source(config)
-    except (FileNotFoundError, PolicyValidationError, ProfileValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
+    except (
+        FileNotFoundError,
+        PolicyValidationError,
+        ProfileValidationError,
+        IntegrationConfigError,
+        ZoneConfigError,
+        SetupConfigError,
+        ValueError,
+    ) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
