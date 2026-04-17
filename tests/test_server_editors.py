@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from integrations import load_integration_config, load_trigger_config
-from server.editors import IntegrationEditor, TriggerEditor
+from server.editors import IntegrationEditor, TriggerEditor, ZoneEditor
 from server.models import WorkspaceManifest
 from server.store import WorkspaceStore
+from zones import load_zones
 
 
 def test_integration_editor_loads_existing_targets_from_workspace_config(tmp_path: Path) -> None:
@@ -290,5 +291,130 @@ def test_trigger_editor_forks_shared_paths_into_workspace_local_files_on_save(tm
     )
 
     assert Path(payload["path"]).name == "visionos.triggers.yaml"
+    assert Path(payload["path"]).parent.name == "desk-a"
+    assert shared_path.read_text(encoding="utf-8") == original_body
+
+
+def test_zone_editor_loads_existing_zones_from_workspace_config(tmp_path: Path) -> None:
+    zones_path = tmp_path / "visionos.zones.yaml"
+    zones_path.write_text(
+        "\n".join(
+            [
+                "zones:",
+                "  - id: desk_a",
+                "    name: Desk A",
+                "    type: occupancy",
+                "    polygon:",
+                "      - [40, 220]",
+                "      - [320, 220]",
+                "      - [320, 520]",
+                "      - [40, 520]",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+            zones_path=str(zones_path),
+        )
+    )
+
+    payload = ZoneEditor(workspace_store).load("desk-a")
+
+    assert payload["workspace_id"] == "desk-a"
+    assert payload["path"] == str(zones_path.resolve())
+    assert payload["exists"] is True
+    assert payload["zone_count"] == 1
+    assert payload["zones"][0]["id"] == "desk_a"
+    assert payload["zones"][0]["polygon_text"] == "40,220\n320,220\n320,520\n40,520"
+
+
+def test_zone_editor_saves_zones_and_updates_workspace_manifest(tmp_path: Path) -> None:
+    config_path = tmp_path / "visionos.config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "source: video",
+                "input: demo/sample.mp4",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+            config_path=str(config_path),
+        )
+    )
+
+    payload = ZoneEditor(workspace_store).save(
+        "desk-a",
+        [
+            {
+                "id": "desk_a",
+                "name": "Desk A",
+                "type": "occupancy",
+                "enabled": True,
+                "profile": "",
+                "labels_of_interest_text": "person, laptop",
+                "polygon_text": "40,220\n320,220\n320,520\n40,520",
+            }
+        ],
+    )
+
+    saved_workspace = workspace_store.get_workspace("desk-a")
+    assert saved_workspace is not None
+    assert saved_workspace.zones_path == payload["path"]
+    assert payload["exists"] is True
+    assert payload["saved"] is True
+    assert payload["zone_count"] == 1
+    saved_zones = load_zones(payload["path"])
+    assert saved_zones[0].zone_id == "desk_a"
+    assert saved_zones[0].labels_of_interest == ("person", "laptop")
+
+
+def test_zone_editor_forks_shared_paths_into_workspace_local_files_on_save(tmp_path: Path) -> None:
+    shared_path = tmp_path / "profiles" / "zones" / "workstation.yaml"
+    shared_path.parent.mkdir(parents=True, exist_ok=True)
+    original_body = "zones: []\n"
+    shared_path.write_text(original_body, encoding="utf-8")
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+            zones_path=str(shared_path),
+        )
+    )
+
+    payload = ZoneEditor(workspace_store).save(
+        "desk-a",
+        [
+            {
+                "id": "desk_a",
+                "name": "Desk A",
+                "type": "occupancy",
+                "enabled": True,
+                "profile": "",
+                "labels_of_interest_text": "",
+                "polygon_text": "40,220\n320,220\n320,520\n40,520",
+            }
+        ],
+    )
+
+    assert Path(payload["path"]).name == "visionos.zones.yaml"
     assert Path(payload["path"]).parent.name == "desk-a"
     assert shared_path.read_text(encoding="utf-8") == original_body

@@ -20,6 +20,8 @@ from integrations import (
 )
 from server.models import WorkspaceManifest
 from server.store import WorkspaceStore
+from zones import ZoneConfigError, load_zones
+from zones.models import Zone, ZoneType
 
 
 class WorkspaceEditorError(ValueError):
@@ -450,6 +452,130 @@ class TriggerEditor:
         }
 
 
+class ZoneEditor:
+    """Load and save workspace zones for the browser workspace shell."""
+
+    def __init__(self, workspace_store: WorkspaceStore) -> None:
+        self.workspace_store = workspace_store
+
+    def load(self, workspace_id: str) -> dict[str, object]:
+        workspace = self._require_workspace(workspace_id)
+        path = self._load_path(workspace)
+        if not path.is_file():
+            return self._payload(workspace, path, ())
+        zones = load_zones(str(path))
+        return self._payload(workspace, path, zones, exists=True)
+
+    def save(self, workspace_id: str, zones: object) -> dict[str, object]:
+        workspace = self._require_workspace(workspace_id)
+        path = self._save_path(workspace)
+        serialized_zones = self._validate_zones(zones, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._serialize_config(serialized_zones), encoding="utf-8")
+        if workspace.zones_path != str(path):
+            self.workspace_store.save_workspace(replace(workspace, zones_path=str(path)))
+            workspace = self._require_workspace(workspace_id)
+        return {
+            **self._payload(workspace, path, serialized_zones, exists=True),
+            "saved": True,
+            "summary": f"Saved {len(serialized_zones)} zone{'s' if len(serialized_zones) != 1 else ''}.",
+        }
+
+    def _payload(
+        self,
+        workspace: WorkspaceManifest,
+        path: Path,
+        zones: tuple[Zone, ...],
+        *,
+        exists: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "workspace_id": workspace.workspace_id,
+            "path": str(path),
+            "exists": exists,
+            "zone_count": len(zones),
+            "zones": [self._zone_to_editor_item(zone) for zone in zones],
+        }
+
+    def _require_workspace(self, workspace_id: str) -> WorkspaceManifest:
+        workspace = self.workspace_store.get_workspace(workspace_id)
+        if workspace is None:
+            raise KeyError(workspace_id)
+        return workspace
+
+    def _load_path(self, workspace: WorkspaceManifest) -> Path:
+        return _resolve_workspace_editor_load_path(
+            self.workspace_store,
+            workspace,
+            explicit_path=workspace.zones_path,
+            kind="zones",
+        )
+
+    def _save_path(self, workspace: WorkspaceManifest) -> Path:
+        return _resolve_workspace_editor_save_path(
+            self.workspace_store,
+            workspace,
+            explicit_path=workspace.zones_path,
+            kind="zones",
+        )
+
+    def _validate_zones(self, zones: object, path: Path) -> tuple[Zone, ...]:
+        if not isinstance(zones, list):
+            raise WorkspaceEditorError("Zone editor payload must define a 'zones' list.")
+        payload = {"zones": [self._editor_item_to_yaml_zone(item) for item in zones]}
+        temp_path = path.with_name(f".{path.name}.tmp")
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+        try:
+            return load_zones(str(temp_path))
+        except ZoneConfigError as exc:
+            raise WorkspaceEditorError(str(exc)) from exc
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def _editor_item_to_yaml_zone(self, item: object) -> dict[str, object]:
+        if not isinstance(item, dict):
+            raise WorkspaceEditorError("Zones must be objects.")
+        zone_id = _require_editor_string(item.get("id"), "Zone id")
+        zone_name = _require_editor_string(item.get("name"), f"Zone '{zone_id}' name")
+        zone_type = _require_editor_string(item.get("type"), f"Zone '{zone_id}' type")
+        enabled = bool(item.get("enabled", True))
+        polygon_text = _require_editor_string(item.get("polygon_text"), f"Zone '{zone_id}' polygon")
+        payload: dict[str, object] = {
+            "id": zone_id,
+            "name": zone_name,
+            "type": zone_type,
+            "polygon": _parse_polygon_text(polygon_text, zone_id),
+        }
+        if not enabled:
+            payload["enabled"] = False
+        profile = _optional_editor_string(item.get("profile"))
+        if profile is not None:
+            payload["profile"] = profile
+        labels = _coerce_editor_string_list(item.get("labels_of_interest_text"))
+        if labels:
+            payload["labels_of_interest"] = labels
+        return payload
+
+    def _serialize_config(self, zones: tuple[Zone, ...]) -> str:
+        payload = {
+            "zones": [zone.to_dict() for zone in zones],
+        }
+        return yaml.safe_dump(payload, sort_keys=False)
+
+    def _zone_to_editor_item(self, zone: Zone) -> dict[str, object]:
+        return {
+            "id": zone.zone_id,
+            "name": zone.name,
+            "type": zone.zone_type.value,
+            "enabled": zone.enabled,
+            "profile": zone.profile or "",
+            "labels_of_interest_text": ", ".join(zone.labels_of_interest),
+            "polygon_text": "\n".join(f"{int(point.x) if point.x.is_integer() else point.x},{int(point.y) if point.y.is_integer() else point.y}" for point in zone.polygon),
+        }
+
+
 def _resolve_workspace_editor_load_path(
     workspace_store: WorkspaceStore,
     workspace: WorkspaceManifest,
@@ -582,3 +708,25 @@ def _parse_metadata_filters(value: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise WorkspaceEditorError("Trigger metadata filters must decode to an object.")
     return payload
+
+
+def _parse_polygon_text(value: str, zone_id: str) -> list[list[float]]:
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) < 3:
+        raise WorkspaceEditorError(f"Zone '{zone_id}' polygon must define at least 3 points.")
+    points: list[list[float]] = []
+    for line in lines:
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) != 2:
+            raise WorkspaceEditorError(
+                f"Zone '{zone_id}' polygon rows must use 'x,y' coordinates."
+            )
+        try:
+            x = float(parts[0])
+            y = float(parts[1])
+        except ValueError as exc:
+            raise WorkspaceEditorError(
+                f"Zone '{zone_id}' polygon rows must contain numeric coordinates."
+            ) from exc
+        points.append([x, y])
+    return points

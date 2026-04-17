@@ -99,6 +99,25 @@ class LaunchpadApp:
             except WorkspaceEditorError as exc:
                 return self._json_error(start_response, "400 Bad Request", str(exc))
             return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/zones") and method == "GET":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/zones").rstrip("/"))
+            try:
+                payload = self.service.load_workspace_zones(workspace_id)
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except WorkspaceEditorError as exc:
+                return self._json_error(start_response, "400 Bad Request", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/zones") and method == "POST":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/zones").rstrip("/"))
+            try:
+                request_payload = self._read_json_body(environ)
+                payload = self.service.save_workspace_zones(workspace_id, request_payload.get("zones", []))
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except WorkspaceEditorError as exc:
+                return self._json_error(start_response, "400 Bad Request", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
         if path == "/api/runtime/stop" and method == "POST":
             try:
                 payload = self.service.stop_workspace()
@@ -355,6 +374,19 @@ def _render_workspace(surface: dict[str, object]) -> str:
             <li>No live session yet.</li>
           </ul>
         </article>
+        <article class="card workspace-zones">
+          <p class="card-kicker">Zone builder</p>
+          <h2>Named spatial regions</h2>
+          <p id="zone-summary">Load a file-backed zone set for this workspace, then save region definitions without dropping back to raw YAML.</p>
+          <p id="zone-path" class="editor-note">Preparing zones path...</p>
+          <div id="zone-list" class="editor-stack">
+            <p class="editor-empty">No zones loaded yet.</p>
+          </div>
+          <div class="workspace-controls">
+            <button id="add-zone" type="button">Add zone</button>
+            <button id="save-zones" type="button" class="secondary-button">Save zones</button>
+          </div>
+        </article>
         <article class="card workspace-triggers">
           <p class="card-kicker">Trigger builder</p>
           <h2>Decision and event rules</h2>
@@ -404,7 +436,13 @@ def _render_workspace(surface: dict[str, object]) -> str:
         const triggerRules = document.getElementById("trigger-rules");
         const addTriggerButton = document.getElementById("add-trigger");
         const saveTriggersButton = document.getElementById("save-triggers");
+        const zoneSummary = document.getElementById("zone-summary");
+        const zonePath = document.getElementById("zone-path");
+        const zoneList = document.getElementById("zone-list");
+        const addZoneButton = document.getElementById("add-zone");
+        const saveZonesButton = document.getElementById("save-zones");
         const canRecord = {json.dumps(workspace["source_mode"] != "replay")};
+        const zoneTypes = ["occupancy", "activity", "transition"];
         const integrationSources = ["trigger", "event", "status", "session_summary"];
         const integrationTypes = ["log", "stdout", "file_append", "webhook", "mqtt_publish"];
         const webhookMethods = ["POST", "PATCH", "PUT", "DELETE"];
@@ -469,6 +507,18 @@ def _render_workspace(surface: dict[str, object]) -> str:
           }};
         }}
 
+        function emptyZone() {{
+          return {{
+            id: `zone-${{Date.now()}}`,
+            name: "New zone",
+            type: "occupancy",
+            enabled: true,
+            profile: "",
+            labels_of_interest_text: "",
+            polygon_text: "40,220\\n320,220\\n320,520\\n40,520",
+          }};
+        }}
+
         function integrationCardMarkup(target) {{
           const triggerIds = (target.trigger_ids || []).join(", ");
           const eventTypes = (target.event_types || []).join(", ");
@@ -526,6 +576,47 @@ def _render_workspace(surface: dict[str, object]) -> str:
                 <label class="editor-field" data-group="interval">
                   <span>Interval seconds</span>
                   <input type="number" data-field="interval_seconds" min="0.1" step="0.1" value="${{escapeHtml(target.interval_seconds ?? "")}}">
+                </label>
+              </div>
+            </article>
+          `;
+        }}
+
+        function zoneCardMarkup(zone) {{
+          return `
+            <article class="zone-card">
+              <div class="integration-card-header">
+                <strong>${{escapeHtml(zone.name || zone.id || "New zone")}}</strong>
+                <button type="button" class="secondary-button compact-button" data-action="remove-zone">Remove zone</button>
+              </div>
+              <div class="editor-grid">
+                <label class="editor-field">
+                  <span>ID</span>
+                  <input type="text" data-field="id" value="${{escapeHtml(zone.id || "")}}">
+                </label>
+                <label class="editor-field">
+                  <span>Name</span>
+                  <input type="text" data-field="name" value="${{escapeHtml(zone.name || "")}}">
+                </label>
+                <label class="editor-field">
+                  <span>Type</span>
+                  <select data-field="type">${{optionMarkup(zoneTypes, zone.type || "occupancy")}}</select>
+                </label>
+                <label class="editor-field">
+                  <span>Profile scope</span>
+                  <input type="text" data-field="profile" value="${{escapeHtml(zone.profile || "")}}" placeholder="meeting_room">
+                </label>
+                <label class="editor-field">
+                  <span>Labels of interest</span>
+                  <input type="text" data-field="labels_of_interest_text" value="${{escapeHtml(zone.labels_of_interest_text || "")}}" placeholder="person, laptop">
+                </label>
+                <label class="editor-field checkbox-field">
+                  <span>Enabled</span>
+                  <input type="checkbox" data-field="enabled"${{zone.enabled === false ? "" : " checked"}}>
+                </label>
+                <label class="editor-field editor-field-wide">
+                  <span>Polygon points</span>
+                  <textarea data-field="polygon_text" rows="4" placeholder="40,220&#10;320,220&#10;320,520&#10;40,520">${{escapeHtml(zone.polygon_text || "")}}</textarea>
                 </label>
               </div>
             </article>
@@ -697,6 +788,13 @@ def _render_workspace(surface: dict[str, object]) -> str:
           }}
         }}
 
+        function syncZoneCard(card) {{
+          const title = card.querySelector(".integration-card-header strong");
+          const nameField = card.querySelector('[data-field="name"]');
+          const idField = card.querySelector('[data-field="id"]');
+          title.textContent = nameField.value.trim() || idField.value.trim() || "New zone";
+        }}
+
         function renderIntegrationTargets(targets) {{
           if (!targets.length) {{
             integrationTargets.innerHTML = '<p class="editor-empty">No integration targets yet. Add one here and save to create the workspace file.</p>';
@@ -716,6 +814,17 @@ def _render_workspace(surface: dict[str, object]) -> str:
           triggerRules.innerHTML = rules.map((rule) => triggerRuleMarkup(rule)).join("");
           for (const card of triggerRules.querySelectorAll(".trigger-card")) {{
             syncTriggerRule(card);
+          }}
+        }}
+
+        function renderZones(zones) {{
+          if (!zones.length) {{
+            zoneList.innerHTML = '<p class="editor-empty">No zones yet. Add one here and save to create the workspace file.</p>';
+            return;
+          }}
+          zoneList.innerHTML = zones.map((zone) => zoneCardMarkup(zone)).join("");
+          for (const card of zoneList.querySelectorAll(".zone-card")) {{
+            syncZoneCard(card);
           }}
         }}
 
@@ -810,6 +919,51 @@ def _render_workspace(surface: dict[str, object]) -> str:
             }}
             return rule;
           }});
+        }}
+
+        function collectZones() {{
+          return [...zoneList.querySelectorAll(".zone-card")].map((card) => {{
+            return {{
+              id: card.querySelector('[data-field="id"]').value.trim(),
+              name: card.querySelector('[data-field="name"]').value.trim(),
+              type: card.querySelector('[data-field="type"]').value,
+              enabled: card.querySelector('[data-field="enabled"]').checked,
+              profile: card.querySelector('[data-field="profile"]').value.trim(),
+              labels_of_interest_text: card.querySelector('[data-field="labels_of_interest_text"]').value.trim(),
+              polygon_text: card.querySelector('[data-field="polygon_text"]').value.trim(),
+            }};
+          }});
+        }}
+
+        async function loadZones() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/zones`, {{ cache: "no-store" }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            zoneSummary.textContent = payload.error || "Unable to load zones.";
+            zoneList.innerHTML = '<p class="editor-empty">No zones available.</p>';
+            return;
+          }}
+          zoneSummary.textContent = payload.exists
+            ? `Editing ${{payload.zone_count}} zone${{payload.zone_count === 1 ? "" : "s"}} for this workspace.`
+            : "No zones file exists yet. Save here to create one for this workspace.";
+          zonePath.textContent = `Path: ${{payload.path}}`;
+          renderZones(payload.zones || []);
+        }}
+
+        async function saveZones() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/zones`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ zones: collectZones() }}),
+          }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            zoneSummary.textContent = payload.error || "Unable to save zones.";
+            return;
+          }}
+          zoneSummary.textContent = payload.summary;
+          zonePath.textContent = `Path: ${{payload.path}}`;
+          renderZones(payload.zones || []);
         }}
 
         async function loadTriggers() {{
@@ -947,6 +1101,13 @@ def _render_workspace(surface: dict[str, object]) -> str:
           renderIntegrationTargets(nextTargets);
         }});
         saveIntegrationsButton.addEventListener("click", saveIntegrations);
+        addZoneButton.addEventListener("click", () => {{
+          const existing = zoneList.querySelectorAll(".zone-card");
+          const nextZones = existing.length ? collectZones() : [];
+          nextZones.push(emptyZone());
+          renderZones(nextZones);
+        }});
+        saveZonesButton.addEventListener("click", saveZones);
         addTriggerButton.addEventListener("click", () => {{
           const existing = triggerRules.querySelectorAll(".trigger-card");
           const nextRules = existing.length ? collectTriggerRules() : [];
@@ -966,6 +1127,19 @@ def _render_workspace(surface: dict[str, object]) -> str:
           card.remove();
           if (!integrationTargets.querySelector(".integration-card")) {{
             integrationTargets.innerHTML = '<p class="editor-empty">No integration targets yet. Add one here and save to create the workspace file.</p>';
+          }}
+        }});
+        zoneList.addEventListener("click", (event) => {{
+          const removeZone = event.target.closest("[data-action='remove-zone']");
+          if (!removeZone) {{
+            return;
+          }}
+          const card = removeZone.closest(".zone-card");
+          if (card) {{
+            card.remove();
+          }}
+          if (!zoneList.querySelector(".zone-card")) {{
+            zoneList.innerHTML = '<p class="editor-empty">No zones yet. Add one here and save to create the workspace file.</p>';
           }}
         }});
         triggerRules.addEventListener("click", (event) => {{
@@ -1018,6 +1192,12 @@ def _render_workspace(surface: dict[str, object]) -> str:
             syncIntegrationCard(card);
           }}
         }});
+        zoneList.addEventListener("input", (event) => {{
+          const card = event.target.closest(".zone-card");
+          if (card && (event.target.matches('[data-field="id"]') || event.target.matches('[data-field="name"]'))) {{
+            syncZoneCard(card);
+          }}
+        }});
         triggerRules.addEventListener("input", (event) => {{
           const ruleCard = event.target.closest(".trigger-card");
           if (ruleCard && event.target.matches('[data-field="id"]')) {{
@@ -1025,6 +1205,7 @@ def _render_workspace(surface: dict[str, object]) -> str:
           }}
         }});
         refreshWorkspace();
+        loadZones();
         loadTriggers();
         loadIntegrations();
         window.setInterval(refreshWorkspace, 1500);
@@ -1200,11 +1381,13 @@ def _base_document(title: str, content: str) -> str:
       .workspace-status,
       .workspace-events,
       .workspace-tabs,
+      .workspace-zones,
       .workspace-triggers,
       .workspace-integrations {{
         min-height: 240px;
       }}
 
+      .workspace-zones,
       .workspace-triggers,
       .workspace-integrations {{
         grid-column: 1 / -1;
@@ -1283,6 +1466,7 @@ def _base_document(title: str, content: str) -> str:
       }}
 
       .trigger-card,
+      .zone-card,
       .trigger-action-card {{
         border: 1px solid var(--line);
         border-radius: 22px;
@@ -1332,7 +1516,8 @@ def _base_document(title: str, content: str) -> str:
       }}
 
       .editor-field input,
-      .editor-field select {{
+      .editor-field select,
+      .editor-field textarea {{
         width: 100%;
         border: 1px solid var(--line);
         border-radius: 14px;
@@ -1340,6 +1525,11 @@ def _base_document(title: str, content: str) -> str:
         background: rgba(255, 255, 255, 0.88);
         color: var(--ink);
         font: inherit;
+      }}
+
+      .editor-field textarea {{
+        resize: vertical;
+        min-height: 6rem;
       }}
 
       .checkbox-field {{
@@ -1354,6 +1544,10 @@ def _base_document(title: str, content: str) -> str:
 
       .is-hidden {{
         display: none;
+      }}
+
+      .editor-field-wide {{
+        grid-column: 1 / -1;
       }}
 
       @media (max-width: 860px) {{
