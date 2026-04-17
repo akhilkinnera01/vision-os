@@ -37,6 +37,7 @@ def parse_args() -> VisionOSConfig:
     parser.add_argument("--config", help="Optional path to a saved Vision OS runtime config YAML file.")
     parser.add_argument("--list-cameras", action="store_true", help="Probe a small camera index range and exit.")
     parser.add_argument("--validate-config", action="store_true", help="Run setup validation and exit.")
+    parser.add_argument("--demo", action="store_true", help="Run the bundled demo preset.")
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
@@ -81,7 +82,15 @@ def parse_args() -> VisionOSConfig:
     parser.add_argument("--log-json", action="store_true", help="Emit structured JSON logs to stderr.")
     args = parser.parse_args()
 
-    config_from_file = load_runtime_config_file(args.config) if args.config else VisionOSConfig()
+    if args.config and args.demo:
+        parser.error("--config and --demo cannot be used together.")
+
+    if args.config:
+        config_from_file = load_runtime_config_file(args.config)
+    elif args.demo:
+        config_from_file = _demo_runtime_config()
+    else:
+        config_from_file = VisionOSConfig()
 
     source_mode = SourceMode(args.source) if "--source" in argv else config_from_file.source_mode
     input_path = args.input if "--input" in argv else config_from_file.input_path
@@ -93,6 +102,7 @@ def parse_args() -> VisionOSConfig:
         config_path=args.config if args.config else config_from_file.config_path,
         list_cameras=args.list_cameras,
         validate_config=args.validate_config,
+        demo_mode=args.demo or config_from_file.demo_mode,
         camera_index=args.camera if "--camera" in argv else config_from_file.camera_index,
         model_name=args.model if "--model" in argv else config_from_file.model_name,
         confidence_threshold=args.conf if "--conf" in argv else config_from_file.confidence_threshold,
@@ -128,6 +138,18 @@ def parse_args() -> VisionOSConfig:
         zones_explicit=("--zones-file" in argv) or config_from_file.zones_explicit,
         trigger_explicit=("--trigger-file" in argv) or config_from_file.trigger_explicit,
         overlay_mode_explicit=("--overlay-mode" in argv) or config_from_file.overlay_mode_explicit,
+    )
+
+
+def _demo_runtime_config() -> VisionOSConfig:
+    """Return the bundled demo preset as a config-like default set."""
+    demo_dir = Path(__file__).resolve().parent / "demo"
+    return VisionOSConfig(
+        demo_mode=True,
+        source_mode=SourceMode.REPLAY,
+        input_path=str(demo_dir / "demo-replay.jsonl"),
+        profile_path=str(demo_dir / "sample-profile.yaml"),
+        overlay_mode=OverlayMode.DEBUG,
     )
 
 
