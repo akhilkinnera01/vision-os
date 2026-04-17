@@ -31,6 +31,7 @@ def _label_rule(
     min_duration_seconds: float = 0.0,
     cooldown_seconds: float = 0.0,
     rearm_on_clear: bool = True,
+    repeat_interval_seconds: float | None = None,
 ) -> TriggerRule:
     return TriggerRule(
         rule_id="focus-session",
@@ -42,6 +43,7 @@ def _label_rule(
         ),
         actions=(TriggerAction(action_type="stdout"),),
         cooldown_seconds=cooldown_seconds,
+        repeat_interval_seconds=repeat_interval_seconds,
         rearm_on_clear=rearm_on_clear,
     )
 
@@ -145,3 +147,23 @@ def test_trigger_engine_event_rules_do_not_need_a_clear_state() -> None:
     assert len(first) == 1
     assert blocked == ()
     assert len(allowed) == 1
+
+
+def test_trigger_engine_repeat_interval_allows_refiring_without_a_clear_state() -> None:
+    engine = TriggerEngine(
+        TriggerConfig(
+            rules=(
+                _label_rule(
+                    repeat_interval_seconds=5.0,
+                ),
+            )
+        )
+    )
+
+    first = engine.evaluate(_snapshot(0.0))
+    blocked = engine.evaluate(_snapshot(4.0))
+    repeated = engine.evaluate(_snapshot(5.0))
+
+    assert len(first) == 1
+    assert blocked == ()
+    assert len(repeated) == 1

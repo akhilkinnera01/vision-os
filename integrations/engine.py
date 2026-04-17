@@ -47,9 +47,14 @@ class TriggerEngine:
                 satisfied_since = state.satisfied_since if state.satisfied_since is not None else snapshot.timestamp
                 duration = snapshot.timestamp - satisfied_since
                 duration_ok = duration >= rule.condition.min_duration_seconds
+                repeat_ready = (
+                    rule.repeat_interval_seconds is not None
+                    and state.last_fired_at is not None
+                    and (snapshot.timestamp - state.last_fired_at) >= rule.repeat_interval_seconds
+                )
                 if (
                     state.armed
-                    and not state.fired_in_current_streak
+                    and (not state.fired_in_current_streak or repeat_ready)
                     and duration_ok
                     and self._cooldown_ready(rule, state, snapshot.timestamp)
                 ):
