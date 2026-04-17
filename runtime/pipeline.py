@@ -69,6 +69,7 @@ class VisionPipeline:
         trigger_config: TriggerConfig | None = None,
         integration_config: IntegrationConfig | None = None,
         profile_id: str | None = None,
+        integration_publisher: IntegrationPublisher | None = None,
         detector: YOLODetector | None = None,
         benchmark_tracker: BenchmarkTracker | None = None,
     ) -> None:
@@ -86,7 +87,7 @@ class VisionPipeline:
         self.explanation_engine = ExplanationEngine()
         self.benchmark_tracker = benchmark_tracker or BenchmarkTracker()
         self.trigger_engine = TriggerEngine(trigger_config) if trigger_config is not None else None
-        self.integration_publisher = (
+        self.integration_publisher = integration_publisher or (
             IntegrationPublisher(
                 integration_config,
                 source_mode=config.source_mode.value,
