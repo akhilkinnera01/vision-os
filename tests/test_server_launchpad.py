@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -111,6 +112,7 @@ def test_launchpad_app_renders_workspace_shell_page(tmp_path: Path) -> None:
     assert "Integrations" in body
     assert "Validate" in body
     assert "Start + Record" in body
+    assert "Save integrations" in body
 
 
 def test_launchpad_app_returns_live_workspace_snapshot(tmp_path: Path) -> None:
@@ -307,13 +309,110 @@ def test_launchpad_app_validates_a_workspace_through_the_service(tmp_path: Path)
     assert '"summary": "Camera ready"' in body
 
 
-def _call_app(app: LaunchpadApp, path: str, *, method: str = "GET") -> tuple[str, list[tuple[str, str]], str]:
-    status, headers, body = _call_app_raw(app, path, method=method)
+def test_launchpad_app_returns_workspace_integrations_payload(tmp_path: Path) -> None:
+    integrations_path = tmp_path / "visionos.integrations.yaml"
+    integrations_path.write_text(
+        "\n".join(
+            [
+                "integrations:",
+                "  - id: focus-hook",
+                "    type: webhook",
+                "    source: trigger",
+                "    trigger_ids:",
+                "      - focus-sustained",
+                "    url: https://example.com/focus",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+            integrations_path=str(integrations_path),
+        )
+    )
+    app = LaunchpadApp(LaunchpadService(workspace_store, session_store, validation_store))
+
+    status, headers, body = _call_app(app, "/api/workspaces/desk-a/integrations")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert '"target_count": 1' in body
+    assert '"id": "focus-hook"' in body
+
+
+def test_launchpad_app_saves_workspace_integrations_payload(tmp_path: Path) -> None:
+    config_path = tmp_path / "visionos.config.yaml"
+    config_path.write_text("source: video\ninput: demo/sample.mp4\n", encoding="utf-8")
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="video",
+            source_ref="demo/sample.mp4",
+            config_path=str(config_path),
+        )
+    )
+    app = LaunchpadApp(LaunchpadService(workspace_store, session_store, validation_store))
+
+    status, headers, body = _call_app(
+        app,
+        "/api/workspaces/desk-a/integrations",
+        method="POST",
+        payload={
+            "targets": [
+                {
+                    "id": "status-log",
+                    "type": "log",
+                    "source": "status",
+                    "enabled": True,
+                    "destination": "room_status_dispatch",
+                    "interval_seconds": 5,
+                }
+            ]
+        },
+    )
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert '"saved": true' in body
+    assert '"target_count": 1' in body
+    saved_workspace = workspace_store.get_workspace("desk-a")
+    assert saved_workspace is not None
+    assert saved_workspace.integrations_path is not None
+    assert Path(saved_workspace.integrations_path).is_file()
+
+
+def _call_app(
+    app: LaunchpadApp,
+    path: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, object] | None = None,
+) -> tuple[str, list[tuple[str, str]], str]:
+    status, headers, body = _call_app_raw(app, path, method=method, payload=payload)
     return status, headers, body.decode("utf-8")
 
 
-def _call_app_raw(app: LaunchpadApp, path: str, *, method: str = "GET") -> tuple[str, list[tuple[str, str]], bytes]:
+def _call_app_raw(
+    app: LaunchpadApp,
+    path: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, object] | None = None,
+) -> tuple[str, list[tuple[str, str]], bytes]:
     captured: dict[str, object] = {}
+    request_body = b"" if payload is None else json.dumps(payload).encode("utf-8")
 
     def start_response(status: str, headers: list[tuple[str, str]]) -> None:
         captured["status"] = status
@@ -325,9 +424,11 @@ def _call_app_raw(app: LaunchpadApp, path: str, *, method: str = "GET") -> tuple
         "QUERY_STRING": "",
         "SERVER_NAME": "127.0.0.1",
         "SERVER_PORT": "8765",
+        "CONTENT_LENGTH": str(len(request_body)),
+        "CONTENT_TYPE": "application/json",
         "wsgi.version": (1, 0),
         "wsgi.url_scheme": "http",
-        "wsgi.input": BytesIO(b""),
+        "wsgi.input": BytesIO(request_body),
         "wsgi.errors": BytesIO(),
         "wsgi.multithread": False,
         "wsgi.multiprocess": False,

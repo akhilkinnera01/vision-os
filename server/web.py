@@ -8,6 +8,7 @@ from urllib.parse import unquote
 import webbrowser
 from wsgiref.simple_server import make_server
 
+from server.editors import WorkspaceEditorError
 from server.launchpad import LaunchpadService
 from server.store import LiveStateStore
 
@@ -59,6 +60,25 @@ class LaunchpadApp:
                 return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
             except RuntimeError as exc:
                 return self._json_error(start_response, "409 Conflict", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/integrations") and method == "GET":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/integrations").rstrip("/"))
+            try:
+                payload = self.service.load_workspace_integrations(workspace_id)
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except WorkspaceEditorError as exc:
+                return self._json_error(start_response, "400 Bad Request", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/integrations") and method == "POST":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/integrations").rstrip("/"))
+            try:
+                request_payload = self._read_json_body(environ)
+                payload = self.service.save_workspace_integrations(workspace_id, request_payload.get("targets", []))
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except WorkspaceEditorError as exc:
+                return self._json_error(start_response, "400 Bad Request", str(exc))
             return self._json_response(start_response, json.dumps(payload, indent=2))
         if path == "/api/runtime/stop" and method == "POST":
             try:
@@ -138,6 +158,23 @@ class LaunchpadApp:
             [("Content-Type", "image/jpeg"), ("Content-Length", str(len(preview)))],
         )
         return [preview]
+
+    def _read_json_body(self, environ) -> dict[str, object]:
+        content_length = environ.get("CONTENT_LENGTH", "0") or "0"
+        try:
+            size = int(content_length)
+        except ValueError as exc:
+            raise WorkspaceEditorError("Invalid request body length.") from exc
+        raw_body = environ["wsgi.input"].read(size)
+        if not raw_body:
+            return {}
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise WorkspaceEditorError("Request body must be valid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise WorkspaceEditorError("Request body root must be an object.")
+        return payload
 
 
 def _render_launchpad(snapshot: dict[str, object]) -> str:
@@ -299,6 +336,19 @@ def _render_workspace(surface: dict[str, object]) -> str:
             <li>No live session yet.</li>
           </ul>
         </article>
+        <article class="card workspace-integrations">
+          <p class="card-kicker">Integration builder</p>
+          <h2>Dispatch targets</h2>
+          <p id="integration-summary">Load a file-backed integration set for this workspace, then save updates without dropping back to raw YAML.</p>
+          <p id="integration-path" class="editor-note">Preparing integrations path...</p>
+          <div id="integration-targets" class="editor-stack">
+            <p class="editor-empty">No integration targets loaded yet.</p>
+          </div>
+          <div class="workspace-controls">
+            <button id="add-integration" type="button">Add integration</button>
+            <button id="save-integrations" type="button" class="secondary-button">Save integrations</button>
+          </div>
+        </article>
       </section>
       <script>
         const workspaceId = {json.dumps(workspace["workspace_id"])};
@@ -312,7 +362,228 @@ def _render_workspace(surface: dict[str, object]) -> str:
         const recordButton = document.getElementById("record-workspace");
         const validateButton = document.getElementById("validate-workspace");
         const stopButton = document.getElementById("stop-workspace");
+        const integrationSummary = document.getElementById("integration-summary");
+        const integrationPath = document.getElementById("integration-path");
+        const integrationTargets = document.getElementById("integration-targets");
+        const addIntegrationButton = document.getElementById("add-integration");
+        const saveIntegrationsButton = document.getElementById("save-integrations");
         const canRecord = {json.dumps(workspace["source_mode"] != "replay")};
+        const integrationSources = ["trigger", "event", "status", "session_summary"];
+        const integrationTypes = ["log", "stdout", "file_append", "webhook", "mqtt_publish"];
+        const webhookMethods = ["POST", "PATCH", "PUT", "DELETE"];
+
+        function escapeHtml(value) {{
+          return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;");
+        }}
+
+        function optionMarkup(options, selectedValue) {{
+          return options
+            .map((option) => `<option value="${{option}}"${{option === selectedValue ? " selected" : ""}}>${{option}}</option>`)
+            .join("");
+        }}
+
+        function emptyIntegrationTarget() {{
+          return {{
+            id: `integration-${{Date.now()}}`,
+            type: "log",
+            source: "trigger",
+            enabled: true,
+            destination: "integration_dispatch",
+            method: "POST",
+            mqtt_host: "",
+            mqtt_port: 1883,
+            mqtt_topic: "",
+            event_types: [],
+            trigger_ids: [],
+            interval_seconds: null,
+          }};
+        }}
+
+        function integrationCardMarkup(target) {{
+          const triggerIds = (target.trigger_ids || []).join(", ");
+          const eventTypes = (target.event_types || []).join(", ");
+          return `
+            <article class="integration-card">
+              <div class="integration-card-header">
+                <strong>${{escapeHtml(target.id || "New integration")}}</strong>
+                <button type="button" class="secondary-button compact-button" data-action="remove-integration">Remove</button>
+              </div>
+              <div class="editor-grid">
+                <label class="editor-field">
+                  <span>ID</span>
+                  <input type="text" data-field="id" value="${{escapeHtml(target.id || "")}}">
+                </label>
+                <label class="editor-field">
+                  <span>Source</span>
+                  <select data-field="source">${{optionMarkup(integrationSources, target.source || "trigger")}}</select>
+                </label>
+                <label class="editor-field">
+                  <span>Type</span>
+                  <select data-field="type">${{optionMarkup(integrationTypes, target.type || "log")}}</select>
+                </label>
+                <label class="editor-field checkbox-field">
+                  <span>Enabled</span>
+                  <input type="checkbox" data-field="enabled"${{target.enabled === false ? "" : " checked"}}>
+                </label>
+                <label class="editor-field" data-group="destination">
+                  <span data-role="destination-label">Destination</span>
+                  <input type="text" data-field="destination" value="${{escapeHtml(target.destination || "")}}">
+                </label>
+                <label class="editor-field" data-group="method">
+                  <span>Method</span>
+                  <select data-field="method">${{optionMarkup(webhookMethods, target.method || "POST")}}</select>
+                </label>
+                <label class="editor-field" data-group="mqtt-host">
+                  <span>MQTT host</span>
+                  <input type="text" data-field="mqtt_host" value="${{escapeHtml(target.mqtt_host || "")}}">
+                </label>
+                <label class="editor-field" data-group="mqtt-topic">
+                  <span>MQTT topic</span>
+                  <input type="text" data-field="mqtt_topic" value="${{escapeHtml(target.mqtt_topic || "")}}">
+                </label>
+                <label class="editor-field" data-group="mqtt-port">
+                  <span>MQTT port</span>
+                  <input type="number" data-field="mqtt_port" min="1" value="${{escapeHtml(target.mqtt_port ?? 1883)}}">
+                </label>
+                <label class="editor-field" data-group="event-types">
+                  <span>Event types</span>
+                  <input type="text" data-field="event_types" value="${{escapeHtml(eventTypes)}}" placeholder="focus_started, distraction_started">
+                </label>
+                <label class="editor-field" data-group="trigger-ids">
+                  <span>Trigger IDs</span>
+                  <input type="text" data-field="trigger_ids" value="${{escapeHtml(triggerIds)}}" placeholder="focus-sustained">
+                </label>
+                <label class="editor-field" data-group="interval">
+                  <span>Interval seconds</span>
+                  <input type="number" data-field="interval_seconds" min="0.1" step="0.1" value="${{escapeHtml(target.interval_seconds ?? "")}}">
+                </label>
+              </div>
+            </article>
+          `;
+        }}
+
+        function syncIntegrationCard(card) {{
+          const source = card.querySelector('[data-field="source"]').value;
+          const type = card.querySelector('[data-field="type"]').value;
+          const destinationGroup = card.querySelector('[data-group="destination"]');
+          const destinationLabel = card.querySelector('[data-role="destination-label"]');
+          const methodGroup = card.querySelector('[data-group="method"]');
+          const mqttHostGroup = card.querySelector('[data-group="mqtt-host"]');
+          const mqttTopicGroup = card.querySelector('[data-group="mqtt-topic"]');
+          const mqttPortGroup = card.querySelector('[data-group="mqtt-port"]');
+          const eventTypesGroup = card.querySelector('[data-group="event-types"]');
+          const triggerIdsGroup = card.querySelector('[data-group="trigger-ids"]');
+          const intervalGroup = card.querySelector('[data-group="interval"]');
+
+          destinationGroup.classList.toggle("is-hidden", type === "stdout" || type === "mqtt_publish");
+          methodGroup.classList.toggle("is-hidden", type !== "webhook");
+          mqttHostGroup.classList.toggle("is-hidden", type !== "mqtt_publish");
+          mqttTopicGroup.classList.toggle("is-hidden", type !== "mqtt_publish");
+          mqttPortGroup.classList.toggle("is-hidden", type !== "mqtt_publish");
+          eventTypesGroup.classList.toggle("is-hidden", source !== "event");
+          triggerIdsGroup.classList.toggle("is-hidden", source !== "trigger");
+          intervalGroup.classList.toggle("is-hidden", source !== "status");
+
+          if (type === "file_append") {{
+            destinationLabel.textContent = "File path";
+          }} else if (type === "webhook") {{
+            destinationLabel.textContent = "Webhook URL";
+          }} else {{
+            destinationLabel.textContent = "Log event";
+          }}
+
+          const title = card.querySelector(".integration-card-header strong");
+          const idField = card.querySelector('[data-field="id"]');
+          title.textContent = idField.value.trim() || "New integration";
+        }}
+
+        function renderIntegrationTargets(targets) {{
+          if (!targets.length) {{
+            integrationTargets.innerHTML = '<p class="editor-empty">No integration targets yet. Add one here and save to create the workspace file.</p>';
+            return;
+          }}
+          integrationTargets.innerHTML = targets.map((target) => integrationCardMarkup(target)).join("");
+          for (const card of integrationTargets.querySelectorAll(".integration-card")) {{
+            syncIntegrationCard(card);
+          }}
+        }}
+
+        function parseListField(value) {{
+          return value
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean);
+        }}
+
+        function collectIntegrationTargets() {{
+          return [...integrationTargets.querySelectorAll(".integration-card")].map((card) => {{
+            const target = {{
+              id: card.querySelector('[data-field="id"]').value.trim(),
+              source: card.querySelector('[data-field="source"]').value,
+              type: card.querySelector('[data-field="type"]').value,
+              enabled: card.querySelector('[data-field="enabled"]').checked,
+              destination: card.querySelector('[data-field="destination"]').value.trim(),
+              method: card.querySelector('[data-field="method"]').value,
+              mqtt_host: card.querySelector('[data-field="mqtt_host"]').value.trim(),
+              mqtt_topic: card.querySelector('[data-field="mqtt_topic"]').value.trim(),
+              mqtt_port: card.querySelector('[data-field="mqtt_port"]').value.trim(),
+              event_types: parseListField(card.querySelector('[data-field="event_types"]').value),
+              trigger_ids: parseListField(card.querySelector('[data-field="trigger_ids"]').value),
+              interval_seconds: card.querySelector('[data-field="interval_seconds"]').value.trim(),
+            }};
+            if (!target.destination) {{
+              delete target.destination;
+            }}
+            if (!target.mqtt_host) {{
+              delete target.mqtt_host;
+            }}
+            if (!target.mqtt_topic) {{
+              delete target.mqtt_topic;
+            }}
+            if (!target.mqtt_port) {{
+              delete target.mqtt_port;
+            }}
+            if (!target.interval_seconds) {{
+              target.interval_seconds = null;
+            }}
+            return target;
+          }});
+        }}
+
+        async function loadIntegrations() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/integrations`, {{ cache: "no-store" }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            integrationSummary.textContent = payload.error || "Unable to load integration targets.";
+            integrationTargets.innerHTML = '<p class="editor-empty">No integration targets available.</p>';
+            return;
+          }}
+          integrationSummary.textContent = payload.exists
+            ? `Editing ${{payload.target_count}} integration target${{payload.target_count === 1 ? "" : "s"}} for this workspace.`
+            : "No integrations file exists yet. Save here to create one for this workspace.";
+          integrationPath.textContent = `Path: ${{payload.path}}`;
+          renderIntegrationTargets(payload.targets || []);
+        }}
+
+        async function saveIntegrations() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/integrations`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ targets: collectIntegrationTargets() }}),
+          }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            integrationSummary.textContent = payload.error || "Unable to save integration targets.";
+            return;
+          }}
+          integrationSummary.textContent = payload.summary;
+          integrationPath.textContent = `Path: ${{payload.path}}`;
+          renderIntegrationTargets(payload.targets || []);
+        }}
 
         async function sendControl(path) {{
           const response = await fetch(path, {{ method: "POST" }});
@@ -380,7 +651,41 @@ def _render_workspace(surface: dict[str, object]) -> str:
         recordButton.addEventListener("click", () => sendControl(`/api/workspaces/${{workspaceId}}/start-recording`));
         validateButton.addEventListener("click", validateWorkspace);
         stopButton.addEventListener("click", () => sendControl("/api/runtime/stop"));
+        addIntegrationButton.addEventListener("click", () => {{
+          const existing = integrationTargets.querySelectorAll(".integration-card");
+          const nextTargets = existing.length ? collectIntegrationTargets() : [];
+          nextTargets.push(emptyIntegrationTarget());
+          renderIntegrationTargets(nextTargets);
+        }});
+        saveIntegrationsButton.addEventListener("click", saveIntegrations);
+        integrationTargets.addEventListener("click", (event) => {{
+          const actionTarget = event.target.closest("[data-action='remove-integration']");
+          if (!actionTarget) {{
+            return;
+          }}
+          const card = actionTarget.closest(".integration-card");
+          if (!card) {{
+            return;
+          }}
+          card.remove();
+          if (!integrationTargets.querySelector(".integration-card")) {{
+            integrationTargets.innerHTML = '<p class="editor-empty">No integration targets yet. Add one here and save to create the workspace file.</p>';
+          }}
+        }});
+        integrationTargets.addEventListener("change", (event) => {{
+          const card = event.target.closest(".integration-card");
+          if (card) {{
+            syncIntegrationCard(card);
+          }}
+        }});
+        integrationTargets.addEventListener("input", (event) => {{
+          const card = event.target.closest(".integration-card");
+          if (card && event.target.matches('[data-field="id"]')) {{
+            syncIntegrationCard(card);
+          }}
+        }});
         refreshWorkspace();
+        loadIntegrations();
         window.setInterval(refreshWorkspace, 1500);
       </script>
     </main>
@@ -553,8 +858,13 @@ def _base_document(title: str, content: str) -> str:
       .workspace-preview,
       .workspace-status,
       .workspace-events,
-      .workspace-tabs {{
+      .workspace-tabs,
+      .workspace-integrations {{
         min-height: 240px;
+      }}
+
+      .workspace-integrations {{
+        grid-column: 1 / -1;
       }}
 
       .preview-frame {{
@@ -587,6 +897,11 @@ def _base_document(title: str, content: str) -> str:
         color: var(--ink);
       }}
 
+      .compact-button {{
+        padding: 0.45rem 0.75rem;
+        font-size: 0.82rem;
+      }}
+
       button:disabled {{
         cursor: not-allowed;
         opacity: 0.55;
@@ -604,6 +919,73 @@ def _base_document(title: str, content: str) -> str:
         padding: 0.85rem 1rem;
         border-radius: 16px;
         background: var(--accent-soft);
+      }}
+
+      .editor-note,
+      .editor-empty {{
+        color: var(--muted);
+      }}
+
+      .editor-stack {{
+        display: grid;
+        gap: 0.85rem;
+        margin-top: 0.85rem;
+      }}
+
+      .integration-card {{
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.48);
+      }}
+
+      .integration-card-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.85rem;
+      }}
+
+      .editor-grid {{
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }}
+
+      .editor-field {{
+        display: grid;
+        gap: 0.35rem;
+        font-size: 0.9rem;
+      }}
+
+      .editor-field span {{
+        color: var(--muted);
+      }}
+
+      .editor-field input,
+      .editor-field select {{
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 0.72rem 0.85rem;
+        background: rgba(255, 255, 255, 0.88);
+        color: var(--ink);
+        font: inherit;
+      }}
+
+      .checkbox-field {{
+        align-content: end;
+      }}
+
+      .checkbox-field input {{
+        width: 1.1rem;
+        height: 1.1rem;
+        padding: 0;
+      }}
+
+      .is-hidden {{
+        display: none;
       }}
 
       @media (max-width: 860px) {{

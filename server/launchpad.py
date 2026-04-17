@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from server.editors import IntegrationEditor
 from server.models import WorkspaceManifest
 from server.runtime_host import RuntimeHost
 from server.store import SessionStore, ValidationStore, WorkspaceStore
@@ -52,12 +53,14 @@ class LaunchpadService:
         validation_store: ValidationStore,
         runtime_host: RuntimeHost | None = None,
         validator: Callable[[WorkspaceManifest], dict[str, object]] | None = None,
+        integration_editor: IntegrationEditor | None = None,
     ) -> None:
         self.workspace_store = workspace_store
         self.session_store = session_store
         self.validation_store = validation_store
         self.runtime_host = runtime_host
         self.validator = validator
+        self.integration_editor = integration_editor or IntegrationEditor(workspace_store)
 
     def build_snapshot(self) -> dict[str, object]:
         workspaces = self.workspace_store.list_workspaces()
@@ -167,3 +170,9 @@ class LaunchpadService:
         if workspace is None:
             raise KeyError(workspace_id)
         return self.validator(workspace)
+
+    def load_workspace_integrations(self, workspace_id: str) -> dict[str, object]:
+        return self.integration_editor.load(workspace_id)
+
+    def save_workspace_integrations(self, workspace_id: str, targets: object) -> dict[str, object]:
+        return self.integration_editor.save(workspace_id, targets)
