@@ -60,6 +60,8 @@ include = [
   "profiles.*",
   "setupux",
   "setupux.*",
+  "server",
+  "server.*",
 ]
 
 [tool.setuptools.package-data]

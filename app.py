@@ -7,6 +7,7 @@ from dataclasses import replace
 import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 import cv2
@@ -20,7 +21,16 @@ from runtime.benchmark import BenchmarkTracker
 from runtime.history import HistoryRecorder, SessionAnalyticsEngine
 from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
-from server import SessionController, WorkspaceManifest
+from server import (
+    SessionController,
+    SessionStore,
+    ValidationRecord,
+    ValidationStore,
+    WorkspaceManifest,
+    WorkspaceStore,
+)
+from server.launchpad import LaunchpadService
+from server.web import LaunchpadApp, serve_launchpad
 from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
@@ -36,6 +46,10 @@ def parse_args() -> VisionOSConfig:
     """Parse CLI arguments into a runtime config object."""
     parser = argparse.ArgumentParser(description="Run Vision OS on a webcam, video, or replay feed.")
     argv = sys.argv[1:]
+    parser.add_argument("--app", action="store_true", help="Run the local Vision OS browser app.")
+    parser.add_argument("--app-host", default="127.0.0.1", help="Host interface for the local browser app.")
+    parser.add_argument("--app-port", type=int, default=8765, help="Port for the local browser app.")
+    parser.add_argument("--no-browser", action="store_true", help="Do not open the local browser app automatically.")
     parser.add_argument("--config", help="Optional path to a saved Vision OS runtime config YAML file.")
     parser.add_argument("--setup", action="store_true", help="Run the guided starter config flow and exit.")
     parser.add_argument("--list-cameras", action="store_true", help="Probe a small camera index range and exit.")
@@ -106,6 +120,10 @@ def parse_args() -> VisionOSConfig:
 
     return VisionOSConfig(
         config_path=args.config if args.config else config_from_file.config_path,
+        app_mode=args.app,
+        app_host=args.app_host if "--app-host" in argv else config_from_file.app_host,
+        app_port=args.app_port if "--app-port" in argv else config_from_file.app_port,
+        open_browser=(not args.no_browser) if "--no-browser" in argv else config_from_file.open_browser,
         setup_mode=args.setup,
         list_cameras=args.list_cameras,
         validate_config=args.validate_config,
@@ -250,6 +268,74 @@ def _build_workspace_manifest(config: VisionOSConfig, *, profile_id: str | None)
         zones_path=config.zones_path,
         triggers_path=config.trigger_path,
         integrations_path=config.integrations_path,
+    )
+
+
+def _server_state_dir() -> Path:
+    """Return the default local browser-app state directory."""
+    return Path.cwd() / ".visionos"
+
+
+def _workspace_store(state_dir: Path | None = None) -> WorkspaceStore:
+    """Build the file-backed workspace catalog store."""
+    base_dir = _server_state_dir() if state_dir is None else state_dir
+    return WorkspaceStore(base_dir / "workspaces.json")
+
+
+def _session_store(state_dir: Path | None = None) -> SessionStore:
+    """Build the file-backed recent-session store."""
+    base_dir = _server_state_dir() if state_dir is None else state_dir
+    return SessionStore(base_dir / "sessions.json")
+
+
+def _validation_store(state_dir: Path | None = None) -> ValidationStore:
+    """Build the file-backed validation summary store."""
+    base_dir = _server_state_dir() if state_dir is None else state_dir
+    return ValidationStore(base_dir / "validations.json")
+
+
+def _build_launchpad_service(state_dir: Path | None = None) -> LaunchpadService:
+    """Assemble the local browser app service from the default state stores."""
+    return LaunchpadService(
+        _workspace_store(state_dir),
+        _session_store(state_dir),
+        _validation_store(state_dir),
+    )
+
+
+def run_local_app(config: VisionOSConfig) -> int:
+    """Run the local browser app shell until the operator stops it."""
+    app = LaunchpadApp(_build_launchpad_service())
+    return serve_launchpad(app, host=config.app_host, port=config.app_port, open_browser=config.open_browser)
+
+
+def _persist_workspace_manifest(config: VisionOSConfig, *, profile_id: str | None) -> WorkspaceManifest:
+    """Save the current workspace manifest so the Launchpad can surface it later."""
+    workspace = _build_workspace_manifest(config, profile_id=profile_id)
+    _workspace_store().save_workspace(workspace)
+    return workspace
+
+
+def _persist_validation_report(workspace_id: str, report: ValidationReport) -> None:
+    """Store the latest validation status for Launchpad health cards."""
+    summary = "Validation finished without detailed checks."
+    status = ValidationStatus.SKIPPED.value
+    if report.checks:
+        summary = report.checks[0].detail
+        if any(check.status == ValidationStatus.ERROR for check in report.checks):
+            status = ValidationStatus.ERROR.value
+            summary = next(check.detail for check in report.checks if check.status == ValidationStatus.ERROR)
+        elif any(check.status == ValidationStatus.OK for check in report.checks):
+            status = ValidationStatus.OK.value
+            summary = next(check.detail for check in report.checks if check.status == ValidationStatus.OK)
+
+    _validation_store().save_result(
+        ValidationRecord(
+            workspace_id=workspace_id,
+            status=status,
+            checked_at=time.time(),
+            summary=summary,
+        )
     )
 
 
@@ -593,6 +679,8 @@ def main() -> int:
     """Run the end-to-end source loop until the user quits or the source is exhausted."""
     try:
         config = parse_args()
+        if config.app_mode:
+            return run_local_app(config)
         if config.setup_mode:
             run_setup_wizard()
             return 0
@@ -604,7 +692,16 @@ def main() -> int:
                 print("Available cameras: none detected")
             return 0
         if config.validate_config:
-            print(format_validation_report(validate_runtime_setup(config)))
+            profile = _load_selected_profile(config)
+            if profile is not None:
+                config = _apply_profile_defaults(config, profile)
+            report = validate_runtime_setup(config)
+            workspace = _persist_workspace_manifest(
+                config,
+                profile_id=None if profile is None else profile.profile_id,
+            )
+            _persist_validation_report(workspace.workspace_id, report)
+            print(format_validation_report(report))
             return 0
         profile = _load_selected_profile(config)
         if profile is not None:
@@ -654,9 +751,8 @@ def main() -> int:
     )
     _log_run_started(config, policy.name, len(zones), logger, profile_id=None if profile is None else profile.profile_id)
     session_controller = SessionController()
-    session_controller.start_session(
-        _build_workspace_manifest(config, profile_id=None if profile is None else profile.profile_id)
-    )
+    workspace = _persist_workspace_manifest(config, profile_id=None if profile is None else profile.profile_id)
+    session_controller.start_session(workspace)
     try:
         if _should_use_streaming_runtime(config):
             result = _run_streaming_mode(
@@ -684,7 +780,8 @@ def main() -> int:
             )
     finally:
         final_state = "completed" if "result" in locals() and result == 0 else "failed"
-        session_controller.finish_session(final_state)
+        completed_session = session_controller.finish_session(final_state)
+        _session_store().append_session(completed_session)
 
     return result
 

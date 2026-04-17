@@ -14,6 +14,8 @@ from common.config import VisionOSConfig
 from common.models import ContextLabel, OverlayMode, RuntimeMetrics, SceneMetrics, SourceMode
 from common.policy import load_policy
 from integrations import TriggeredActionRecord
+from server.store import SessionStore, ValidationStore, WorkspaceStore
+from setupux.models import ValidationCheck, ValidationReport, ValidationStatus
 
 
 def test_webcam_uses_streaming_runtime_even_when_headless() -> None:
@@ -78,6 +80,29 @@ def test_parse_args_accepts_zones_file(monkeypatch) -> None:
     assert config.source_mode == SourceMode.VIDEO
     assert config.zones_path == "config/zones.yaml"
     assert config.trigger_path == "config/triggers.yaml"
+
+
+def test_parse_args_accepts_local_app_flags(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "app.py",
+            "--app",
+            "--app-host",
+            "0.0.0.0",
+            "--app-port",
+            "9001",
+            "--no-browser",
+        ],
+    )
+
+    config = app.parse_args()
+
+    assert config.app_mode is True
+    assert config.app_host == "0.0.0.0"
+    assert config.app_port == 9001
+    assert config.open_browser is False
 
 
 def test_validate_input_path_rejects_missing_zones_file() -> None:
@@ -178,6 +203,11 @@ def test_main_builds_a_workspace_manifest_for_session_control(monkeypatch) -> No
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
     monkeypatch.setattr(app, "_load_selected_profile", lambda _config: SimpleNamespace(profile_id="meeting_room"))
     monkeypatch.setattr(app, "_apply_profile_defaults", lambda cfg, _profile: cfg)
+    monkeypatch.setattr(
+        app,
+        "_session_store",
+        lambda: SimpleNamespace(append_session=lambda record: captured.update({"completed_session": record})),
+    )
     monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: 0)
 
@@ -186,6 +216,77 @@ def test_main_builds_a_workspace_manifest_for_session_control(monkeypatch) -> No
     assert captured["workspace"].profile_id == "meeting_room"
     assert captured["workspace"].source_ref == "demo/sample.mp4"
     assert captured["final_state"] == "completed"
+
+
+def test_main_routes_local_app_mode_before_runtime_setup(monkeypatch) -> None:
+    config = VisionOSConfig(app_mode=True, open_browser=False)
+    captured = {}
+
+    monkeypatch.setattr(app, "parse_args", lambda: config)
+    monkeypatch.setattr(
+        app,
+        "run_local_app",
+        lambda local_config: captured.update({"config": local_config}) or 0,
+    )
+
+    assert app.main() == 0
+    assert captured["config"] is config
+
+
+def test_main_persists_validation_summary_for_launchpad(monkeypatch, tmp_path: Path) -> None:
+    config = VisionOSConfig(validate_config=True, profile_name="workstation")
+    report = ValidationReport(
+        checks=(
+            ValidationCheck(name="source", status=ValidationStatus.OK, detail="Camera ready"),
+            ValidationCheck(name="model", status=ValidationStatus.OK, detail="Model loaded"),
+        )
+    )
+
+    monkeypatch.setattr(app, "parse_args", lambda: config)
+    monkeypatch.setattr(app, "_server_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(app, "_load_selected_profile", lambda _config: SimpleNamespace(profile_id="workstation"))
+    monkeypatch.setattr(app, "_apply_profile_defaults", lambda cfg, _profile: cfg)
+    monkeypatch.setattr(app, "validate_runtime_setup", lambda _config: report)
+
+    assert app.main() == 0
+
+    workspaces = WorkspaceStore(tmp_path / "workspaces.json").list_workspaces()
+    validation = ValidationStore(tmp_path / "validations.json").get_result("workstation-webcam")
+    assert len(workspaces) == 1
+    assert workspaces[0].workspace_id == "workstation-webcam"
+    assert validation is not None
+    assert validation.status == "ok"
+    assert validation.summary == "Camera ready"
+
+
+def test_main_persists_completed_session_for_launchpad(monkeypatch, tmp_path: Path) -> None:
+    config = VisionOSConfig(
+        source_mode=SourceMode.VIDEO,
+        input_path="demo/sample.mp4",
+        profile_name="meeting_room",
+        headless=True,
+    )
+
+    monkeypatch.setattr(app, "parse_args", lambda: config)
+    monkeypatch.setattr(app, "_server_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(app, "_validate_input_path", lambda _config: None)
+    monkeypatch.setattr(app, "load_policy", lambda name, path=None: load_policy(name, path))
+    monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
+    monkeypatch.setattr(app, "_build_source", lambda _config: object())
+    monkeypatch.setattr(app, "_load_selected_profile", lambda _config: SimpleNamespace(profile_id="meeting_room"))
+    monkeypatch.setattr(app, "_apply_profile_defaults", lambda cfg, _profile: cfg)
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args, **_kwargs: 0)
+
+    assert app.main() == 0
+
+    workspaces = WorkspaceStore(tmp_path / "workspaces.json").list_workspaces()
+    sessions = SessionStore(tmp_path / "sessions.json").list_sessions()
+    assert len(workspaces) == 1
+    assert workspaces[0].workspace_id == "meeting_room-video"
+    assert len(sessions) == 1
+    assert sessions[0].workspace_id == "meeting_room-video"
+    assert sessions[0].state == "completed"
 
 
 def test_run_sequential_mode_records_trigger_records(monkeypatch, tmp_path) -> None:

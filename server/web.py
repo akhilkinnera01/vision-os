@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from html import escape
 from urllib.parse import unquote
+import webbrowser
+from wsgiref.simple_server import make_server
 
 from server.launchpad import LaunchpadService
 
@@ -398,3 +400,18 @@ def _base_document(title: str, content: str) -> str:
     {content}
   </body>
 </html>"""
+
+
+def serve_launchpad(app: LaunchpadApp, *, host: str, port: int, open_browser: bool) -> int:
+    """Run the local browser shell until the operator stops it."""
+    browser_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    url = f"http://{browser_host}:{port}/"
+    with make_server(host, port, app) as server:
+        print(f"Vision OS browser app running at {url}")
+        if open_browser:
+            webbrowser.open(url)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    return 0

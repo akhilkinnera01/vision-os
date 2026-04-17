@@ -12,6 +12,10 @@ class VisionOSConfig:
     """Small config object that keeps the app wiring explicit and testable."""
 
     config_path: str | None = None
+    app_mode: bool = False
+    app_host: str = "127.0.0.1"
+    app_port: int = 8765
+    open_browser: bool = True
     setup_mode: bool = False
     list_cameras: bool = False
     validate_config: bool = False

@@ -1,6 +1,7 @@
 .DS_Store
 .pytest_cache/
 .venv/
+.visionos/
 .omx/
 __pycache__/
 *.pyc
