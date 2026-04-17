@@ -25,7 +25,7 @@ from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
 from setupux.config_file import SetupConfigError, load_runtime_config_file
 from setupux.models import ValidationCheck, ValidationReport, ValidationStatus
-from setupux.summary import format_validation_report
+from setupux.summary import format_startup_summary, format_validation_report
 from setupux.validate import discover_camera_indexes, validate_runtime_setup
 from setupux.wizard import run_setup_wizard
 from zones import ZoneConfigError, load_zones, select_zones_for_profile
@@ -540,6 +540,16 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
+    trigger_count = 0 if trigger_config is None else len(getattr(trigger_config, "rules", ()))
+    print(
+        format_startup_summary(
+            config,
+            policy_name=policy.name,
+            zone_count=len(zones),
+            trigger_count=trigger_count,
+            profile_id=None if profile is None else profile.profile_id,
+        )
+    )
     _log_run_started(config, policy.name, len(zones), logger, profile_id=None if profile is None else profile.profile_id)
     if _should_use_streaming_runtime(config):
         return _run_streaming_mode(config, policy, zones, trigger_config, source, renderer, logger)
