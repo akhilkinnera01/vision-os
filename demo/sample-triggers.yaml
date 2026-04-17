@@ -1,13 +1,28 @@
 triggers:
-  - id: desk-a-focus-log
-    event_type: zone_focus_started
-    zone_id: desk_a
-    log_path: out/zone-events.jsonl
+  - id: sustained-focus-log
+    when:
+      source: decision.label
+      operator: equals
+      value: Focused Work
+      min_duration_seconds: 5
+    then:
+      - type: file_append
+        path: out/trigger-events.jsonl
+      - type: log
+        event: trigger_fired
+    cooldown_seconds: 15
 
   - id: whiteboard-group-webhook
-    event_type: zone_group_started
-    zone_id: whiteboard
-    webhook_url: https://example.com/opencheckin/group
+    when:
+      source: event.event_type
+      operator: equals
+      value: zone_group_started
+      event_metadata_filters:
+        zone_id: whiteboard
+    then:
+      - type: webhook
+        url: https://example.com/opencheckin/group
+    cooldown_seconds: 30
 
   - id: desk-b-clear-mqtt
     event_type: zone_cleared

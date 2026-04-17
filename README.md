@@ -176,8 +176,8 @@ computes zone-local state such as `empty`, `occupied`, `solo_focus`, and
 
 ### Triggered zone mode
 
-Use this when zone events should also fan out to local logs, webhooks, or a narrow
-MQTT output:
+Use this when stable scene states or zone events should also fan out to logs,
+stdout, webhooks, file appends, or a narrow MQTT output:
 
 ```bash
 python app.py \
@@ -340,21 +340,58 @@ serialized zone timeline for each frame.
 
 ## Trigger Files
 
-Trigger files let you match emitted events and send them to one or more outputs.
+Trigger files let you match stable runtime state or emitted events and send them to
+one or more outputs.
 
 ```yaml
 triggers:
-  - id: desk-a-focus-log
-    event_type: zone_focus_started
-    zone_id: desk_a
-    log_path: out/zone-events.jsonl
+  - id: focus-session
+    when:
+      source: decision.label
+      operator: equals
+      value: Focused Work
+      min_duration_seconds: 300
+    then:
+      - type: file_append
+        path: out/focus-session.jsonl
+      - type: log
+        event: trigger_fired
+    cooldown_seconds: 600
 ```
 
-Supported outputs in the current narrow surface:
+Supported condition sources in the current surface:
 
-- local JSONL event log via `log_path`
-- HTTP webhook via `webhook_url`
-- plain MQTT publish via `mqtt_host`, `mqtt_port`, and `mqtt_topic`
+- `decision.label`
+- `decision.confidence`
+- `temporal.metrics.*`
+- `event.event_type` with optional `event_metadata_filters`
+
+Supported outputs:
+
+- structured log via `type: log`
+- stdout via `type: stdout`
+- file append via `type: file_append`
+- HTTP webhook via `type: webhook`
+- plain MQTT publish via `type: mqtt_publish`
+
+Legacy flat event rules are still accepted for backward compatibility:
+
+```yaml
+triggers:
+  - id: desk-b-clear-mqtt
+    event_type: zone_cleared
+    zone_id: desk_b
+    mqtt_host: 127.0.0.1
+    mqtt_port: 1883
+    mqtt_topic: opencheckin/zones/desk_b
+```
+
+Trigger evaluation is stateful. Rules can use:
+
+- `min_duration_seconds`
+- `cooldown_seconds`
+- `repeat_interval_seconds`
+- `rearm_on_clear`
 
 Trigger failures are logged and do not stop the inference loop.
 
