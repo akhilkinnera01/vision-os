@@ -21,7 +21,7 @@ from decision.engine import DecisionEngine
 from events.emitter import EventEmitter
 from explain.explain import ExplanationEngine
 from features.builder import FeatureBuilder
-from integrations import TriggerConfig, TriggerEngine, TriggeredActionRecord
+from integrations import DispatchRecord, IntegrationConfig, IntegrationPublisher, TriggerConfig, TriggerEngine, TriggeredActionRecord
 from integrations.models import TriggerSnapshot
 from perception.detector import YOLODetector
 from runtime.benchmark import BenchmarkTracker
@@ -55,6 +55,7 @@ class InferenceOutput:
     history_record: HistoryRecord
     zone_states: tuple[ZoneRuntimeState, ...] = ()
     trigger_records: tuple[TriggeredActionRecord, ...] = ()
+    integration_records: tuple[DispatchRecord, ...] = ()
 
 
 class VisionPipeline:
@@ -66,6 +67,8 @@ class VisionPipeline:
         policy: VisionPolicy,
         zones: tuple[Zone, ...] = (),
         trigger_config: TriggerConfig | None = None,
+        integration_config: IntegrationConfig | None = None,
+        profile_id: str | None = None,
         detector: YOLODetector | None = None,
         benchmark_tracker: BenchmarkTracker | None = None,
     ) -> None:
@@ -83,6 +86,15 @@ class VisionPipeline:
         self.explanation_engine = ExplanationEngine()
         self.benchmark_tracker = benchmark_tracker or BenchmarkTracker()
         self.trigger_engine = TriggerEngine(trigger_config) if trigger_config is not None else None
+        self.integration_publisher = (
+            IntegrationPublisher(
+                integration_config,
+                source_mode=config.source_mode.value,
+                profile_id=profile_id,
+            )
+            if integration_config is not None
+            else None
+        )
         self.zone_assigner = ZoneAssigner() if zones else None
         self.zone_feature_builder = ZoneFeatureBuilder(self.feature_builder) if zones else None
         self.zone_rules_engine = ZoneRulesEngine() if zones else None
@@ -244,6 +256,16 @@ class VisionPipeline:
             zone_labels={zone_state.zone_id: zone_state.context.label.value for zone_state in zone_states},
             stage_timings=runtime_metrics.stage_timings,
         )
+        integration_records: tuple[DispatchRecord, ...] = ()
+        if self.integration_publisher is not None:
+            with timer.measure("integration"):
+                integration_records = self.integration_publisher.publish_runtime(
+                    decision=decision,
+                    runtime_metrics=runtime_metrics,
+                    history_record=history_record,
+                    events=tuple(events),
+                    trigger_records=trigger_records,
+                )
         return InferenceOutput(
             frame_index=packet.frame_index,
             detections=detections,
@@ -255,4 +277,5 @@ class VisionPipeline:
             history_record=history_record,
             zone_states=zone_states,
             trigger_records=trigger_records,
+            integration_records=integration_records,
         )
