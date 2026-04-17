@@ -167,12 +167,20 @@ def _validate_input_path(config: VisionOSConfig) -> None:
             raise FileNotFoundError(f"Trigger config not found: {trigger_path}")
 
 
-def _log_run_started(config: VisionOSConfig, policy_name: str, zone_count: int, logger: VisionLogger) -> None:
+def _log_run_started(
+    config: VisionOSConfig,
+    policy_name: str,
+    zone_count: int,
+    logger: VisionLogger,
+    *,
+    profile_id: str | None = None,
+) -> None:
     """Emit one structured record that captures the active runtime configuration."""
     logger.log(
         "run_started",
         mode=config.source_mode.value,
         policy=policy_name,
+        profile=profile_id,
         zone_count=zone_count,
         overlay_mode=config.overlay_mode.value,
         headless=config.headless,
@@ -404,7 +412,7 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    _log_run_started(config, policy.name, len(zones), logger)
+    _log_run_started(config, policy.name, len(zones), logger, profile_id=None if profile is None else profile.profile_id)
     if _should_use_streaming_runtime(config):
         return _run_streaming_mode(config, policy, zones, trigger_config, source, renderer, logger)
     return _run_sequential_mode(config, policy, zones, trigger_config, source, renderer, logger)

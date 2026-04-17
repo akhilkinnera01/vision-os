@@ -234,3 +234,24 @@ def test_main_preserves_explicit_overrides_over_profile_defaults(monkeypatch) ->
     assert captured["zones_path"] == "custom/zones.yaml"
     assert captured["trigger_path"] == "custom/triggers.yaml"
     assert captured["overlay_mode"] == OverlayMode.COMPACT
+
+
+def test_log_run_started_includes_profile_metadata() -> None:
+    config = VisionOSConfig(
+        source_mode=SourceMode.VIDEO,
+        input_path="demo/sample.mp4",
+        profile_name="meeting_room",
+        zones_path="config/zones.yaml",
+        trigger_path="config/triggers.yaml",
+    )
+    captured = {}
+
+    class _Logger:
+        def log(self, event: str, **kwargs) -> None:
+            captured["event"] = event
+            captured["kwargs"] = kwargs
+
+    app._log_run_started(config, "office", 3, _Logger(), profile_id="meeting_room")
+
+    assert captured["event"] == "run_started"
+    assert captured["kwargs"]["profile"] == "meeting_room"
