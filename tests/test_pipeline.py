@@ -29,7 +29,17 @@ from runtime.io import FramePacket, ReplayFrameSource, ReplayRecorder
 from runtime.pipeline import VisionPipeline
 from state.memory import TemporalMemory
 from common.policy import load_policy
-from zones import Zone, ZonePoint, ZoneType
+from zones import (
+    Zone,
+    ZoneContext,
+    ZoneContextLabel,
+    ZoneDecision,
+    ZoneFeatureSet,
+    ZonePoint,
+    ZoneRuntimeState,
+    ZoneTemporalState,
+    ZoneType,
+)
 
 
 def make_detection(
@@ -187,6 +197,20 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
     output_path = tmp_path / "session.jsonl"
     recorder = ReplayRecorder(str(output_path), source_mode=SourceMode.WEBCAM)
     detections = [make_detection("person", (100, 100, 250, 400)), make_detection("laptop", (260, 280, 480, 420))]
+    zone_state = ZoneRuntimeState(
+        zone_id="desk_a",
+        zone_name="Desk A",
+        zone_type=ZoneType.OCCUPANCY,
+        feature_set=ZoneFeatureSet(
+            zone_id="desk_a",
+            zone_name="Desk A",
+            zone_type=ZoneType.OCCUPANCY,
+            occupied=True,
+        ),
+        context=ZoneContext(label=ZoneContextLabel.SOLO_FOCUS, confidence=0.86),
+        decision=ZoneDecision(label=ZoneContextLabel.SOLO_FOCUS, confidence=0.86, action="Preserve focus-friendly zone state"),
+        temporal_state=ZoneTemporalState(stability_score=0.92),
+    )
     recorder.write(
         frame_index=3,
         timestamp=1.25,
@@ -200,6 +224,7 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
                 scene_label="Focused Work",
             )
         ],
+        zone_states=(zone_state,),
     )
     recorder.close()
 
@@ -213,6 +238,8 @@ def test_replay_record_round_trip(tmp_path: Path) -> None:
     assert packet.replay_detections[0].label == "person"
     assert packet.replay_events is not None
     assert packet.replay_events[0].event_type == "focus_sustained"
+    assert packet.replay_zone_states is not None
+    assert packet.replay_zone_states[0]["zone_id"] == "desk_a"
     assert packet.frame.shape == (720, 1280, 3)
 
 

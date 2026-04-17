@@ -213,6 +213,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, source, renderer:
                         frame_shape=packet.frame.shape[:2],
                         detections=output.detections,
                         events=output.events,
+                        zone_states=output.zone_states,
                     )
                 _queue_latest(result_queue, output)
             except Exception as exc:  # pragma: no cover - exercised in runtime
@@ -301,6 +302,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, source, renderer
                     frame_shape=packet.frame.shape[:2],
                     detections=output.detections,
                     events=output.events,
+                    zone_states=output.zone_states,
                 )
             processed_frames += 1
 

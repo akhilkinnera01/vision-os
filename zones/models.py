@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 
 from common.models import Detection, SceneFeatures
@@ -86,6 +86,17 @@ class ZoneFeatureSet:
     occupied: bool = False
     actor_track_ids: tuple[int, ...] = field(default_factory=tuple)
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "zone_id": self.zone_id,
+            "zone_name": self.zone_name,
+            "zone_type": self.zone_type.value,
+            "features": asdict(self.features),
+            "detection_count": self.detection_count,
+            "occupied": self.occupied,
+            "actor_track_ids": list(self.actor_track_ids),
+        }
+
 
 @dataclass(slots=True, frozen=True)
 class ZoneContext:
@@ -96,6 +107,14 @@ class ZoneContext:
     signals: tuple[str, ...] = field(default_factory=tuple)
     confidence_reason: str = ""
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "label": self.label.value,
+            "confidence": self.confidence,
+            "signals": list(self.signals),
+            "confidence_reason": self.confidence_reason,
+        }
+
 
 @dataclass(slots=True, frozen=True)
 class ZoneDecision:
@@ -105,6 +124,14 @@ class ZoneDecision:
     confidence: float
     action: str
     reasoning_facts: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "label": self.label.value,
+            "confidence": self.confidence,
+            "action": self.action,
+            "reasoning_facts": list(self.reasoning_facts),
+        }
 
 
 @dataclass(slots=True, frozen=True)
@@ -128,6 +155,17 @@ class ZoneTemporalState:
     stability_score: float = 0.0
     notes: tuple[str, ...] = field(default_factory=tuple)
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "window_span_seconds": self.window_span_seconds,
+            "dominant_label": None if self.dominant_label is None else self.dominant_label.value,
+            "current_label_duration_seconds": self.current_label_duration_seconds,
+            "occupied_duration_seconds": self.occupied_duration_seconds,
+            "label_switch_count": self.label_switch_count,
+            "stability_score": self.stability_score,
+            "notes": list(self.notes),
+        }
+
 
 @dataclass(slots=True, frozen=True)
 class ZoneRuntimeState:
@@ -140,3 +178,14 @@ class ZoneRuntimeState:
     context: ZoneContext
     decision: ZoneDecision
     temporal_state: ZoneTemporalState
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "zone_id": self.zone_id,
+            "zone_name": self.zone_name,
+            "zone_type": self.zone_type.value,
+            "feature_set": self.feature_set.to_dict(),
+            "context": self.context.to_dict(),
+            "decision": self.decision.to_dict(),
+            "temporal_state": self.temporal_state.to_dict(),
+        }

@@ -178,6 +178,7 @@ class VisionPipeline:
                 temporal_state,
                 actor_frame_state,
                 features,
+                zone_states=zone_states,
             )
 
         with timer.measure("explain"):

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from common.models import ActorFrameState, SceneFeatures, TemporalState
 from common.policy import EventPolicy
-from events.models import CollaborationEvent, DistractionEvent, SceneTransitionEvent, StabilityEvent
+from events.models import CollaborationEvent, DistractionEvent, SceneTransitionEvent, StabilityEvent, ZoneEvent
+from zones.models import ZoneContextLabel, ZoneRuntimeState
 
 
 class EventReducer:
@@ -114,3 +115,35 @@ class EventReducer:
             for track_id, actor in actor_frame_state.actors.items()
             if actor.interaction_state == "phone_engaged"
         }
+
+    def zone_occupied(self, timestamp: float, zone_state: ZoneRuntimeState) -> ZoneEvent:
+        return ZoneEvent(
+            event_type="zone_occupied",
+            timestamp=timestamp,
+            description=f"{zone_state.zone_name} became occupied",
+            metadata={"zone_id": zone_state.zone_id, "zone_label": zone_state.context.label.value},
+        )
+
+    def zone_cleared(self, timestamp: float, zone_state: ZoneRuntimeState) -> ZoneEvent:
+        return ZoneEvent(
+            event_type="zone_cleared",
+            timestamp=timestamp,
+            description=f"{zone_state.zone_name} became empty",
+            metadata={"zone_id": zone_state.zone_id, "zone_label": zone_state.context.label.value},
+        )
+
+    def zone_focus_started(self, timestamp: float, zone_state: ZoneRuntimeState) -> ZoneEvent:
+        return ZoneEvent(
+            event_type="zone_focus_started",
+            timestamp=timestamp,
+            description=f"{zone_state.zone_name} entered solo focus",
+            metadata={"zone_id": zone_state.zone_id, "zone_label": ZoneContextLabel.SOLO_FOCUS.value},
+        )
+
+    def zone_group_started(self, timestamp: float, zone_state: ZoneRuntimeState) -> ZoneEvent:
+        return ZoneEvent(
+            event_type="zone_group_started",
+            timestamp=timestamp,
+            description=f"{zone_state.zone_name} entered group activity",
+            metadata={"zone_id": zone_state.zone_id, "zone_label": ZoneContextLabel.GROUP_ACTIVITY.value},
+        )

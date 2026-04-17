@@ -6,11 +6,15 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from common.models import Detection, ReplayRecord, SourceMode, VisionEvent
+
+if TYPE_CHECKING:
+    from zones.models import ZoneRuntimeState
 
 
 def _ensure_parent_directory(path: Path) -> None:
@@ -28,6 +32,7 @@ class FramePacket:
     source_mode: SourceMode
     replay_detections: list[Detection] | None = None
     replay_events: list[VisionEvent] | None = None
+    replay_zone_states: list[dict[str, object]] | None = None
 
 
 class WebcamFrameSource:
@@ -111,6 +116,7 @@ class ReplayFrameSource:
             source_mode=SourceMode.REPLAY,
             replay_detections=record.detections,
             replay_events=record.events,
+            replay_zone_states=record.zone_states,
         )
 
     def is_opened(self) -> bool:
@@ -136,6 +142,7 @@ class ReplayRecorder:
         frame_shape: tuple[int, int],
         detections: list[Detection],
         events: list[VisionEvent] | None = None,
+        zone_states: tuple["ZoneRuntimeState", ...] | None = None,
     ) -> None:
         record = ReplayRecord(
             frame_index=frame_index,
@@ -144,6 +151,7 @@ class ReplayRecorder:
             detections=detections,
             source_mode=self._source_mode,
             events=events or [],
+            zone_states=[zone_state.to_dict() for zone_state in zone_states or ()],
         )
         self._file.write(json.dumps(record.to_dict()) + "\n")
         self._file.flush()

@@ -316,6 +316,7 @@ class ReplayRecord:
     detections: list[Detection]
     source_mode: SourceMode
     events: list[VisionEvent] = field(default_factory=list)
+    zone_states: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -325,6 +326,7 @@ class ReplayRecord:
             "detections": [detection.to_dict() for detection in self.detections],
             "source_mode": self.source_mode.value,
             "events": [event.to_dict() for event in self.events],
+            "zone_states": self.zone_states,
         }
 
     @classmethod
@@ -336,4 +338,5 @@ class ReplayRecord:
             detections=[Detection.from_dict(item) for item in payload["detections"]],
             source_mode=SourceMode(str(payload["source_mode"])),
             events=[VisionEvent.from_dict(item) for item in payload.get("events", [])],
+            zone_states=[dict(item) for item in payload.get("zone_states", [])],
         )
