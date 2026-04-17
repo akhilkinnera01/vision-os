@@ -38,6 +38,7 @@ to model what is happening over time.
 - typed runtime events for transitions, distractions, collaboration changes, and stability changes
 - zone-aware reasoning for named desks, benches, and room areas through `--zones-file`
 - runtime profiles for workstation, study room, meeting room, lab bench, and waiting area deployments
+- guided setup, saved runtime manifests, and preflight validation through `--setup`, `--config`, and `--validate-config`
 - structured explanations for both compact and debug rendering
 - benchmark output with FPS, latency, dropped frames, switch rate, stability score, and stage timings
 - replay recording for deterministic debugging and regression testing
@@ -81,7 +82,24 @@ python -m pip install -e ".[dev]"
 
 The first run may download the default YOLO weights, usually `yolov8n.pt`.
 
-### 2. Try the included demo video
+### 2. Run guided setup or use the committed demo config
+
+Guided setup:
+
+```bash
+python app.py --setup
+```
+
+Deterministic saved-config smoke test:
+
+```bash
+python app.py --config demo/demo-setup-config.yaml --max-frames 5
+```
+
+This is the shortest path from fresh clone to a validated manifest-driven run.
+For the full workflow, see [docs/easy-setup.md](docs/easy-setup.md).
+
+### 3. Try the included demo video
 
 ```bash
 python app.py \
@@ -91,7 +109,7 @@ python app.py \
 
 This is the easiest way to confirm the app is wired correctly before testing a live camera.
 
-### 3. Save a replay, benchmark, and session analytics
+### 4. Save a replay, benchmark, and session analytics
 
 ```bash
 python app.py \
@@ -103,7 +121,7 @@ python app.py \
   --session-summary-output demo/demo-session-summary.json
 ```
 
-### 4. Replay the exact same run in debug mode
+### 5. Replay the exact same run in debug mode
 
 ```bash
 python app.py \
@@ -115,6 +133,7 @@ python app.py \
 The repo already ships these demo artifacts from the sample flow:
 
 - `demo/sample.mp4`
+- `demo/demo-setup-config.yaml`
 - `demo/sample-zones.yaml`
 - `demo/sample-triggers.yaml`
 - `demo/demo-replay.jsonl`
@@ -126,6 +145,38 @@ The repo already ships these demo artifacts from the sample flow:
 Press `q` to exit any non-headless run.
 
 ## Run Modes
+
+### Easy setup mode
+
+Use this when you want the repo to generate and validate a starter bundle for you:
+
+```bash
+python app.py --setup
+```
+
+The guided flow writes:
+
+- `visionos.config.yaml`
+- `visionos.zones.yaml`
+- `visionos.triggers.yaml`
+
+The saved config can then be reused with:
+
+```bash
+python app.py --config visionos.config.yaml
+```
+
+Useful helpers:
+
+```bash
+python app.py --list-cameras
+python app.py --config visionos.config.yaml --validate-config
+python app.py --demo
+```
+
+The normal runtime now prints a short startup summary so you can see which config,
+source, profile, outputs, zone count, and trigger count are active before the first
+frame is processed.
 
 ### Webcam mode
 
@@ -265,6 +316,17 @@ Replay mode is good for:
 
 - `--source webcam|video|replay`
 - `--input PATH` is required for `video` and `replay`
+- `--config PATH` can replace the raw source flags when you want a saved manifest
+
+### Setup and onboarding options
+
+| Flag | Meaning |
+| --- | --- |
+| `--setup` | run the guided setup flow and write a starter bundle |
+| `--config PATH` | load a saved setup/runtime manifest |
+| `--validate-config` | run preflight validation and exit |
+| `--list-cameras` | probe a small range of webcam indexes and exit |
+| `--demo` | load the committed replay + profile preset |
 
 ### Detection and runtime options
 

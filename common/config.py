@@ -11,6 +11,11 @@ from common.models import OverlayMode, SourceMode
 class VisionOSConfig:
     """Small config object that keeps the app wiring explicit and testable."""
 
+    config_path: str | None = None
+    setup_mode: bool = False
+    list_cameras: bool = False
+    validate_config: bool = False
+    demo_mode: bool = False
     camera_index: int = 0
     model_name: str = "yolov8n.pt"
     confidence_threshold: float = 0.35

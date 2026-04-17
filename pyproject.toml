@@ -58,6 +58,8 @@ include = [
   "policies.*",
   "profiles",
   "profiles.*",
+  "setupux",
+  "setupux.*",
 ]
 
 [tool.setuptools.package-data]
