@@ -18,4 +18,7 @@ recordings/
 demo/*.json
 demo/*.jsonl
 !demo/sample.mp4
+!demo/demo-benchmark.json
+!demo/demo-replay.jsonl
+!demo/sample-overlay.png
 !tests/replays/*.jsonl

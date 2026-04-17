@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from common.models import ContextLabel
 from runtime.benchmark import BenchmarkTracker
 from telemetry.health import HealthMonitor, WorkerFailure
+from telemetry.logging import VisionLogger
 from telemetry.timers import StageTimer
 
 
@@ -48,3 +51,24 @@ def test_health_monitor_raises_worker_failures() -> None:
 
     with pytest.raises(WorkerFailure, match="track"):
         monitor.raise_if_unhealthy()
+
+
+def test_vision_logger_text_mode_prints_key_values(capsys: pytest.CaptureFixture[str]) -> None:
+    logger = VisionLogger(json_mode=False)
+    logger.log("run_started", mode="video", overlay_mode="debug")
+
+    captured = capsys.readouterr()
+    assert "[vision-os] run_started" in captured.err
+    assert "mode=video" in captured.err
+    assert "overlay_mode=debug" in captured.err
+
+
+def test_vision_logger_json_mode_emits_structured_records(capsys: pytest.CaptureFixture[str]) -> None:
+    logger = VisionLogger(json_mode=True)
+    logger.log("artifact_written", kind="benchmark", path="/tmp/out.json")
+
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["event"] == "artifact_written"
+    assert payload["kind"] == "benchmark"
+    assert payload["path"] == "/tmp/out.json"
+    assert "timestamp" in payload
