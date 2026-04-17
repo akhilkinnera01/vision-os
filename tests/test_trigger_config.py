@@ -145,3 +145,43 @@ triggers:
 
     with pytest.raises(IntegrationConfigError, match="cooldown_seconds"):
         load_trigger_config(str(config_path))
+
+
+def test_load_trigger_config_rejects_unsupported_source(tmp_path: Path) -> None:
+    config_path = tmp_path / "triggers.yaml"
+    config_path.write_text(
+        """
+triggers:
+  - id: bad-source
+    when:
+      source: scene.label
+      operator: equals
+      value: Focused Work
+    then:
+      - type: stdout
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(IntegrationConfigError, match="unsupported source"):
+        load_trigger_config(str(config_path))
+
+
+def test_load_trigger_config_rejects_unsupported_operator(tmp_path: Path) -> None:
+    config_path = tmp_path / "triggers.yaml"
+    config_path.write_text(
+        """
+triggers:
+  - id: bad-operator
+    when:
+      source: decision.label
+      operator: contains
+      value: Focused Work
+    then:
+      - type: stdout
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(IntegrationConfigError, match="unsupported operator"):
+        load_trigger_config(str(config_path))

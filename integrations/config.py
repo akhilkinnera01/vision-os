@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
+from common.models import SceneMetrics
 from integrations.models import TriggerAction, TriggerCondition, TriggerConfig, TriggerRule
 
 
 class IntegrationConfigError(ValueError):
     """Raised when a trigger/integration config is malformed."""
+
+
+SUPPORTED_TRIGGER_OPERATORS = frozenset({"equals", "not_equals", "gte", "gt", "lte", "lt"})
+SUPPORTED_TRIGGER_DECISION_SOURCES = frozenset({"decision.label", "decision.confidence"})
+SUPPORTED_TEMPORAL_METRICS = frozenset(field.name for field in fields(SceneMetrics))
+SUPPORTED_WEBHOOK_METHODS = frozenset({"DELETE", "PATCH", "POST", "PUT"})
 
 
 def load_trigger_config(path: str) -> TriggerConfig:
@@ -139,6 +148,8 @@ def _parse_condition(payload: object, rule_id: str) -> TriggerCondition:
 
     source = _require_string(payload, "source", 0)
     operator = _require_string(payload, "operator", 0)
+    _validate_condition_source(rule_id, source)
+    _validate_condition_operator(rule_id, operator)
     if "value" not in payload:
         raise IntegrationConfigError(f"Trigger '{rule_id}' field 'when.value' is required.")
     value = payload["value"]
@@ -185,10 +196,16 @@ def _parse_actions(payload: object, rule_id: str) -> tuple[TriggerAction, ...]:
             continue
         if action_type == "webhook":
             target = _require_string(raw_action, "url", index)
+            _validate_webhook_url(rule_id, target)
             method = raw_action.get("method", "POST")
             if not isinstance(method, str) or not method.strip():
                 raise IntegrationConfigError(f"Trigger '{rule_id}' action '{action_type}' requires a valid 'method'.")
-            actions.append(TriggerAction(action_type="webhook", target=target, method=method.strip().upper()))
+            normalized_method = method.strip().upper()
+            if normalized_method not in SUPPORTED_WEBHOOK_METHODS:
+                raise IntegrationConfigError(
+                    f"Trigger '{rule_id}' action '{action_type}' uses unsupported method '{normalized_method}'."
+                )
+            actions.append(TriggerAction(action_type="webhook", target=target, method=normalized_method))
             continue
         if action_type == "mqtt_publish":
             host = _require_string(raw_action, "host", index)
@@ -213,3 +230,29 @@ def _parse_actions(payload: object, rule_id: str) -> tuple[TriggerAction, ...]:
         raise IntegrationConfigError(f"Trigger '{rule_id}' action type '{action_type}' is not supported.")
 
     return tuple(actions)
+
+
+def _validate_condition_source(rule_id: str, source: str) -> None:
+    if source in SUPPORTED_TRIGGER_DECISION_SOURCES or source == "event.event_type":
+        return
+    if source.startswith("temporal.metrics."):
+        metric_name = source.removeprefix("temporal.metrics.")
+        if metric_name in SUPPORTED_TEMPORAL_METRICS:
+            return
+    if source.startswith("event.metadata.") and source.removeprefix("event.metadata."):
+        return
+    raise IntegrationConfigError(f"Trigger '{rule_id}' field 'when.source' uses unsupported source '{source}'.")
+
+
+def _validate_condition_operator(rule_id: str, operator: str) -> None:
+    if operator in SUPPORTED_TRIGGER_OPERATORS:
+        return
+    raise IntegrationConfigError(f"Trigger '{rule_id}' field 'when.operator' uses unsupported operator '{operator}'.")
+
+
+def _validate_webhook_url(rule_id: str, url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise IntegrationConfigError(
+            f"Trigger '{rule_id}' action 'webhook' must use an absolute http(s) URL."
+        )
