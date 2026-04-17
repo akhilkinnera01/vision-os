@@ -6,11 +6,12 @@ from server.models import (
     SessionEvent,
     SessionRecord,
     SessionSnapshot,
+    ValidationRecord,
     WorkspaceManifest,
     WorkspaceSummary,
 )
 from server.runtime_host import RuntimeHost
-from server.store import WorkspaceStore
+from server.store import SessionStore, ValidationStore, WorkspaceStore
 
 __all__ = [
     "ArtifactIndex",
@@ -18,7 +19,10 @@ __all__ = [
     "RuntimeHost",
     "SessionEvent",
     "SessionRecord",
+    "SessionStore",
     "SessionSnapshot",
+    "ValidationRecord",
+    "ValidationStore",
     "WorkspaceManifest",
     "WorkspaceSummary",
     "WorkspaceStore",

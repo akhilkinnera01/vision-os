@@ -122,6 +122,17 @@ class SessionRecord:
             "artifacts": self.artifacts.to_dict(),
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> SessionRecord:
+        return cls(
+            session_id=str(payload["session_id"]),
+            workspace_id=str(payload["workspace_id"]),
+            state=str(payload["state"]),
+            started_at=_optional_float(payload.get("started_at")),
+            ended_at=_optional_float(payload.get("ended_at")),
+            artifacts=ArtifactIndex.from_dict(_optional_dict(payload.get("artifacts"))),
+        )
+
 
 @dataclass(slots=True, frozen=True)
 class SessionSnapshot:
@@ -169,9 +180,40 @@ class SessionEvent:
         }
 
 
+@dataclass(slots=True, frozen=True)
+class ValidationRecord:
+    """Latest validation status known for a workspace."""
+
+    workspace_id: str
+    status: str
+    checked_at: float
+    summary: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "workspace_id": self.workspace_id,
+            "status": self.status,
+            "checked_at": self.checked_at,
+            "summary": self.summary,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> ValidationRecord:
+        return cls(
+            workspace_id=str(payload["workspace_id"]),
+            status=str(payload["status"]),
+            checked_at=float(payload["checked_at"]),
+            summary=str(payload["summary"]),
+        )
+
+
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
 def _optional_dict(value: object) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
+
+
+def _optional_float(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) else None
