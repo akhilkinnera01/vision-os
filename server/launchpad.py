@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from server.models import WorkspaceManifest
 from server.runtime_host import RuntimeHost
 from server.store import SessionStore, ValidationStore, WorkspaceStore
 
@@ -48,11 +51,13 @@ class LaunchpadService:
         session_store: SessionStore,
         validation_store: ValidationStore,
         runtime_host: RuntimeHost | None = None,
+        validator: Callable[[WorkspaceManifest], dict[str, object]] | None = None,
     ) -> None:
         self.workspace_store = workspace_store
         self.session_store = session_store
         self.validation_store = validation_store
         self.runtime_host = runtime_host
+        self.validator = validator
 
     def build_snapshot(self) -> dict[str, object]:
         workspaces = self.workspace_store.list_workspaces()
@@ -147,3 +152,11 @@ class LaunchpadService:
             "stopped": True,
             "workspace_id": active_workspace_id,
         }
+
+    def validate_workspace(self, workspace_id: str) -> dict[str, object]:
+        if self.validator is None:
+            raise RuntimeError("Workspace validation is not available for browser-driven actions.")
+        workspace = self.workspace_store.get_workspace(workspace_id)
+        if workspace is None:
+            raise KeyError(workspace_id)
+        return self.validator(workspace)

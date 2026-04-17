@@ -109,6 +109,7 @@ def test_launchpad_app_renders_workspace_shell_page(tmp_path: Path) -> None:
     assert "Lab Bench 3" in body
     assert "Live" in body
     assert "Integrations" in body
+    assert "Validate" in body
 
 
 def test_launchpad_app_returns_live_workspace_snapshot(tmp_path: Path) -> None:
@@ -231,6 +232,39 @@ def test_launchpad_app_stops_the_active_runtime_workspace(tmp_path: Path) -> Non
     assert ("Content-Type", "application/json; charset=utf-8") in headers
     assert captured["stopped"] is True
     assert '"stopped": true' in body
+
+
+def test_launchpad_app_validates_a_workspace_through_the_service(tmp_path: Path) -> None:
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    captured = {}
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="webcam",
+        )
+    )
+    service = LaunchpadService(
+        workspace_store,
+        session_store,
+        validation_store,
+        validator=lambda workspace: captured.update({"workspace_id": workspace.workspace_id}) or {
+            "workspace_id": workspace.workspace_id,
+            "status": "ok",
+            "summary": "Camera ready",
+            "checks": [{"name": "source", "status": "ok", "detail": "Camera ready"}],
+        },
+    )
+    app = LaunchpadApp(service)
+
+    status, headers, body = _call_app(app, "/api/workspaces/desk-a/validate", method="POST")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert captured["workspace_id"] == "desk-a"
+    assert '"summary": "Camera ready"' in body
 
 
 def _call_app(app: LaunchpadApp, path: str, *, method: str = "GET") -> tuple[str, list[tuple[str, str]], str]:

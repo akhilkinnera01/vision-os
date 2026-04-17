@@ -339,6 +339,39 @@ def test_write_live_session_state_persists_snapshot_and_preview(tmp_path: Path) 
     assert store.load_preview() is not None
 
 
+def test_validate_workspace_manifest_persists_a_browser_ready_summary(monkeypatch, tmp_path: Path) -> None:
+    workspace = app.WorkspaceManifest(
+        workspace_id="sample_demo-replay",
+        name="Sample Demo",
+        source_mode="replay",
+        profile_id="sample_demo",
+        profile_path="demo/sample-profile.yaml",
+        policy_name="office",
+        source_ref="demo/demo-replay.jsonl",
+        zones_path="demo/sample-zones.yaml",
+        triggers_path="demo/sample-triggers.yaml",
+        integrations_path="demo/sample-integrations.yaml",
+    )
+    report = ValidationReport(
+        checks=(
+            ValidationCheck(name="profile", status=ValidationStatus.OK, detail="Loaded profile sample_demo"),
+            ValidationCheck(name="source", status=ValidationStatus.OK, detail="Replay ready"),
+        )
+    )
+
+    monkeypatch.setattr(app, "_server_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(app, "validate_runtime_setup", lambda config: report)
+
+    payload = app._validate_workspace_manifest(workspace)
+
+    assert payload["workspace_id"] == "sample_demo-replay"
+    assert payload["status"] == "ok"
+    assert payload["summary"] == "Loaded profile sample_demo"
+    stored = ValidationStore(tmp_path / "validations.json").get_result("sample_demo-replay")
+    assert stored is not None
+    assert stored.summary == "Loaded profile sample_demo"
+
+
 def test_run_sequential_mode_records_trigger_records(monkeypatch, tmp_path) -> None:
     config = VisionOSConfig(
         source_mode=SourceMode.VIDEO,

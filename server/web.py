@@ -42,6 +42,15 @@ class LaunchpadApp:
             except RuntimeError as exc:
                 return self._json_error(start_response, "409 Conflict", str(exc))
             return self._json_response(start_response, json.dumps(payload, indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/validate") and method == "POST":
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/validate").rstrip("/"))
+            try:
+                payload = self.service.validate_workspace(workspace_id)
+            except KeyError:
+                return self._json_error(start_response, "404 Not Found", f"No saved space found for {workspace_id}.")
+            except RuntimeError as exc:
+                return self._json_error(start_response, "409 Conflict", str(exc))
+            return self._json_response(start_response, json.dumps(payload, indent=2))
         if path == "/api/runtime/stop" and method == "POST":
             try:
                 payload = self.service.stop_workspace()
@@ -273,6 +282,7 @@ def _render_workspace(surface: dict[str, object]) -> str:
           <h2>Events and warnings</h2>
           <div class="workspace-controls">
             <button id="start-workspace" type="button">Start</button>
+            <button id="validate-workspace" type="button" class="secondary-button">Validate</button>
             <button id="stop-workspace" type="button" class="secondary-button">Stop</button>
           </div>
           <ul id="live-events" class="tab-list">
@@ -289,6 +299,7 @@ def _render_workspace(surface: dict[str, object]) -> str:
         const preview = document.getElementById("live-preview");
         const previewCaption = document.getElementById("preview-caption");
         const startButton = document.getElementById("start-workspace");
+        const validateButton = document.getElementById("validate-workspace");
         const stopButton = document.getElementById("stop-workspace");
 
         async function sendControl(path) {{
@@ -299,6 +310,22 @@ def _render_workspace(surface: dict[str, object]) -> str:
             return;
           }}
           await refreshWorkspace();
+        }}
+
+        async function validateWorkspace() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/validate`, {{ method: "POST" }});
+          const payload = await response.json();
+          if (!response.ok) {{
+            events.innerHTML = `<li>${{payload.error || "Validation failed."}}</li>`;
+            return;
+          }}
+          sceneLabel.textContent = "Validation complete";
+          summary.textContent = payload.summary;
+          metrics.textContent = payload.report;
+          const checks = payload.checks || [];
+          events.innerHTML = checks.length
+            ? checks.map((check) => `<li>${{check.name}}: ${{check.status.toUpperCase()}} - ${{check.detail}}</li>`).join("")
+            : "<li>No validation checks were returned.</li>";
         }}
 
         async function refreshWorkspace() {{
@@ -336,6 +363,7 @@ def _render_workspace(surface: dict[str, object]) -> str:
         }}
 
         startButton.addEventListener("click", () => sendControl(`/api/workspaces/${{workspaceId}}/start`));
+        validateButton.addEventListener("click", validateWorkspace);
         stopButton.addEventListener("click", () => sendControl("/api/runtime/stop"));
         refreshWorkspace();
         window.setInterval(refreshWorkspace, 1500);

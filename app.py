@@ -320,6 +320,7 @@ def _build_launchpad_service(state_dir: Path | None = None, runtime_host: Runtim
         _session_store(state_dir),
         _validation_store(state_dir),
         runtime_host=runtime_host,
+        validator=_validate_workspace_manifest,
     )
 
 
@@ -387,6 +388,20 @@ def _persist_workspace_manifest(config: VisionOSConfig, *, profile_id: str | Non
 
 def _persist_validation_report(workspace_id: str, report: ValidationReport) -> None:
     """Store the latest validation status for Launchpad health cards."""
+    status, summary = _summarize_validation_report(report)
+
+    _validation_store().save_result(
+        ValidationRecord(
+            workspace_id=workspace_id,
+            status=status,
+            checked_at=time.time(),
+            summary=summary,
+        )
+    )
+
+
+def _summarize_validation_report(report: ValidationReport) -> tuple[str, str]:
+    """Return the most useful browser-facing summary from a validation report."""
     summary = "Validation finished without detailed checks."
     status = ValidationStatus.SKIPPED.value
     if report.checks:
@@ -397,15 +412,54 @@ def _persist_validation_report(workspace_id: str, report: ValidationReport) -> N
         elif any(check.status == ValidationStatus.OK for check in report.checks):
             status = ValidationStatus.OK.value
             summary = next(check.detail for check in report.checks if check.status == ValidationStatus.OK)
+    return status, summary
 
-    _validation_store().save_result(
-        ValidationRecord(
-            workspace_id=workspace_id,
-            status=status,
-            checked_at=time.time(),
-            summary=summary,
-        )
+
+def _workspace_manifest_to_config(workspace: WorkspaceManifest) -> VisionOSConfig:
+    """Reconstruct a validation-ready config from a saved workspace manifest."""
+    if workspace.config_path is not None:
+        return load_runtime_config_file(workspace.config_path)
+
+    camera_index = 0
+    input_path = workspace.source_ref
+    if workspace.source_mode == SourceMode.WEBCAM.value:
+        camera_index = int(workspace.source_ref or "0")
+        input_path = None
+
+    return VisionOSConfig(
+        config_path=workspace.config_path,
+        camera_index=camera_index,
+        source_mode=SourceMode(workspace.source_mode),
+        input_path=input_path,
+        profile_name=workspace.profile_id,
+        profile_path=workspace.profile_path,
+        zones_path=workspace.zones_path,
+        trigger_path=workspace.triggers_path,
+        integrations_path=workspace.integrations_path,
+        record_path=workspace.outputs.replay_path,
+        benchmark_output_path=workspace.outputs.benchmark_path,
+        history_output_path=workspace.outputs.history_path,
+        session_summary_output_path=workspace.outputs.session_summary_path,
+        policy_name=workspace.policy_name or "default",
+        policy_path=workspace.policy_path,
     )
+
+
+def _validate_workspace_manifest(workspace: WorkspaceManifest) -> dict[str, object]:
+    """Run browser-triggered validation for a saved workspace and persist the result."""
+    report = validate_runtime_setup(_workspace_manifest_to_config(workspace))
+    _persist_validation_report(workspace.workspace_id, report)
+    status, summary = _summarize_validation_report(report)
+    return {
+        "workspace_id": workspace.workspace_id,
+        "status": status,
+        "summary": summary,
+        "report": format_validation_report(report),
+        "checks": [
+            {"name": check.name, "status": check.status.value, "detail": check.detail}
+            for check in report.checks
+        ],
+    }
 
 
 def _log_run_started(
