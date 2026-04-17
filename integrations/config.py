@@ -2,35 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
+from integrations.models import TriggerAction, TriggerCondition, TriggerConfig, TriggerRule
+
 
 class IntegrationConfigError(ValueError):
     """Raised when a trigger/integration config is malformed."""
-
-
-@dataclass(slots=True, frozen=True)
-class TriggerRule:
-    """One event-driven trigger rule."""
-
-    rule_id: str
-    event_type: str
-    zone_id: str | None = None
-    log_path: str | None = None
-    webhook_url: str | None = None
-    mqtt_host: str | None = None
-    mqtt_port: int = 1883
-    mqtt_topic: str | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class TriggerConfig:
-    """Loaded trigger rules for the runtime."""
-
-    rules: tuple[TriggerRule, ...]
 
 
 def load_trigger_config(path: str) -> TriggerConfig:
@@ -63,6 +43,28 @@ def _parse_rule(payload: object, index: int) -> TriggerRule:
         raise IntegrationConfigError(f"Trigger at index {index} must be a mapping.")
 
     rule_id = _require_string(payload, "id", index)
+    enabled = _optional_bool(payload, "enabled", rule_id, default=True)
+    cooldown_seconds = _numeric_field(payload, "cooldown_seconds", rule_id, default=0.0)
+    if cooldown_seconds < 0:
+        raise IntegrationConfigError(f"Trigger '{rule_id}' field 'cooldown_seconds' must be >= 0.")
+    repeat_interval_seconds = _optional_numeric_field(payload, "repeat_interval_seconds", rule_id)
+    if repeat_interval_seconds is not None and repeat_interval_seconds < 0:
+        raise IntegrationConfigError(f"Trigger '{rule_id}' field 'repeat_interval_seconds' must be >= 0.")
+    rearm_on_clear = _optional_bool(payload, "rearm_on_clear", rule_id, default=True)
+
+    if "when" in payload:
+        condition = _parse_condition(payload["when"], rule_id)
+        actions = _parse_actions(payload.get("then"), rule_id)
+        return TriggerRule(
+            rule_id=rule_id,
+            enabled=enabled,
+            condition=condition,
+            actions=actions,
+            cooldown_seconds=cooldown_seconds,
+            repeat_interval_seconds=repeat_interval_seconds,
+            rearm_on_clear=rearm_on_clear,
+        )
+
     event_type = _require_string(payload, "event_type", index)
     zone_id = _optional_string(payload, "zone_id", rule_id)
     log_path = _optional_string(payload, "log_path", rule_id)
@@ -81,6 +83,10 @@ def _parse_rule(payload: object, index: int) -> TriggerRule:
 
     return TriggerRule(
         rule_id=rule_id,
+        enabled=enabled,
+        cooldown_seconds=cooldown_seconds,
+        repeat_interval_seconds=repeat_interval_seconds,
+        rearm_on_clear=rearm_on_clear,
         event_type=event_type,
         zone_id=zone_id,
         log_path=log_path,
@@ -105,3 +111,105 @@ def _optional_string(payload: dict[str, object], key: str, rule_id: str) -> str 
     if not isinstance(value, str) or not value.strip():
         raise IntegrationConfigError(f"Trigger '{rule_id}' field '{key}' must be a non-empty string when present.")
     return value.strip()
+
+
+def _optional_bool(payload: dict[str, object], key: str, rule_id: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if not isinstance(value, bool):
+        raise IntegrationConfigError(f"Trigger '{rule_id}' field '{key}' must be a boolean.")
+    return value
+
+
+def _numeric_field(payload: dict[str, object], key: str, rule_id: str, default: float = 0.0) -> float:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise IntegrationConfigError(f"Trigger '{rule_id}' field '{key}' must be numeric.")
+    return float(value)
+
+
+def _optional_numeric_field(payload: dict[str, object], key: str, rule_id: str) -> float | None:
+    if key not in payload:
+        return None
+    return _numeric_field(payload, key, rule_id)
+
+
+def _parse_condition(payload: object, rule_id: str) -> TriggerCondition:
+    if not isinstance(payload, dict):
+        raise IntegrationConfigError(f"Trigger '{rule_id}' field 'when' must be a mapping.")
+
+    source = _require_string(payload, "source", 0)
+    operator = _require_string(payload, "operator", 0)
+    if "value" not in payload:
+        raise IntegrationConfigError(f"Trigger '{rule_id}' field 'when.value' is required.")
+    value = payload["value"]
+    min_duration_seconds = _numeric_field(payload, "min_duration_seconds", rule_id, default=0.0)
+    if min_duration_seconds < 0:
+        raise IntegrationConfigError(f"Trigger '{rule_id}' field 'min_duration_seconds' must be >= 0.")
+    if source.startswith("event.") and min_duration_seconds > 0:
+        raise IntegrationConfigError(
+            f"Trigger '{rule_id}' event-backed rules do not support min_duration_seconds."
+        )
+
+    event_metadata_filters = payload.get("event_metadata_filters", {})
+    if event_metadata_filters is None:
+        event_metadata_filters = {}
+    if not isinstance(event_metadata_filters, dict):
+        raise IntegrationConfigError(
+            f"Trigger '{rule_id}' field 'when.event_metadata_filters' must be a mapping."
+        )
+
+    return TriggerCondition(
+        source=source,
+        operator=operator,
+        value=value,
+        min_duration_seconds=min_duration_seconds,
+        event_metadata_filters=dict(event_metadata_filters),
+    )
+
+
+def _parse_actions(payload: object, rule_id: str) -> tuple[TriggerAction, ...]:
+    if not isinstance(payload, list) or not payload:
+        raise IntegrationConfigError(f"Trigger '{rule_id}' must define a non-empty 'then' list.")
+
+    actions: list[TriggerAction] = []
+    for index, raw_action in enumerate(payload):
+        if not isinstance(raw_action, dict):
+            raise IntegrationConfigError(f"Trigger '{rule_id}' action at index {index} must be a mapping.")
+        action_type = _require_string(raw_action, "type", index)
+        if action_type == "stdout":
+            actions.append(TriggerAction(action_type="stdout"))
+            continue
+        if action_type == "file_append":
+            target = _require_string(raw_action, "path", index)
+            actions.append(TriggerAction(action_type="file_append", target=target))
+            continue
+        if action_type == "webhook":
+            target = _require_string(raw_action, "url", index)
+            method = raw_action.get("method", "POST")
+            if not isinstance(method, str) or not method.strip():
+                raise IntegrationConfigError(f"Trigger '{rule_id}' action '{action_type}' requires a valid 'method'.")
+            actions.append(TriggerAction(action_type="webhook", target=target, method=method.strip().upper()))
+            continue
+        if action_type == "mqtt_publish":
+            host = _require_string(raw_action, "host", index)
+            topic = _require_string(raw_action, "topic", index)
+            port = int(raw_action.get("port", 1883))
+            if port <= 0:
+                raise IntegrationConfigError(f"Trigger '{rule_id}' action '{action_type}' field 'port' must be > 0.")
+            actions.append(
+                TriggerAction(
+                    action_type="mqtt_publish",
+                    target=topic,
+                    mqtt_host=host,
+                    mqtt_port=port,
+                    mqtt_topic=topic,
+                )
+            )
+            continue
+        if action_type == "log":
+            target = _optional_string(raw_action, "event", rule_id)
+            actions.append(TriggerAction(action_type="log", target=target or "trigger_fired"))
+            continue
+        raise IntegrationConfigError(f"Trigger '{rule_id}' action type '{action_type}' is not supported.")
+
+    return tuple(actions)
