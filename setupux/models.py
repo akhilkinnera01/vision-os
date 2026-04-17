@@ -28,3 +28,12 @@ class ValidationReport:
     """Ordered setup validation results."""
 
     checks: tuple[ValidationCheck, ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True, frozen=True)
+class SetupBundle:
+    """Paths written by the Easy Setup starter bundle helper."""
+
+    config_path: str
+    zones_path: str
+    trigger_path: str

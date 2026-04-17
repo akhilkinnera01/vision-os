@@ -8,6 +8,7 @@ import yaml
 
 from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
+from setupux.models import SetupBundle
 
 
 class SetupConfigError(ValueError):
@@ -76,6 +77,88 @@ def load_runtime_config_file(config_path: str) -> VisionOSConfig:
     )
 
 
+def write_runtime_config_file(config: VisionOSConfig, config_path: str) -> str:
+    """Write a YAML runtime config manifest and keep bundle-local paths relative."""
+    path = Path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "source": config.source_mode.value,
+        "camera": config.camera_index,
+        "model": config.model_name,
+        "conf": config.confidence_threshold,
+        "imgsz": config.image_size,
+        "max_detections": config.max_detections,
+        "profile": config.profile_name,
+        "overlay_mode": config.overlay_mode.value,
+        "temporal_window": config.temporal_window_seconds,
+        "headless": config.headless,
+        "log_json": config.log_json,
+        "policy": config.policy_name,
+    }
+    if config.device is not None:
+        payload["device"] = config.device
+    if config.input_path is not None:
+        payload["input"] = _relativize_path(path.parent, config.input_path)
+    if config.profile_path is not None:
+        payload["profile_file"] = _relativize_path(path.parent, config.profile_path)
+    if config.zones_path is not None:
+        payload["zones_file"] = _relativize_path(path.parent, config.zones_path)
+    if config.trigger_path is not None:
+        payload["trigger_file"] = _relativize_path(path.parent, config.trigger_path)
+    if config.record_path is not None:
+        payload["record"] = _relativize_path(path.parent, config.record_path)
+    if config.benchmark_output_path is not None:
+        payload["benchmark_output"] = _relativize_path(path.parent, config.benchmark_output_path)
+    if config.history_output_path is not None:
+        payload["history_output"] = _relativize_path(path.parent, config.history_output_path)
+    if config.session_summary_output_path is not None:
+        payload["session_summary_output"] = _relativize_path(path.parent, config.session_summary_output_path)
+    if config.policy_path is not None:
+        payload["policy_file"] = _relativize_path(path.parent, config.policy_path)
+    if config.max_frames is not None:
+        payload["max_frames"] = config.max_frames
+
+    with path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(payload, handle, sort_keys=False)
+    return str(path)
+
+
+def write_starter_bundle(
+    *,
+    output_dir: str,
+    source_mode: SourceMode,
+    camera_index: int,
+    profile_name: str | None,
+    overlay_mode: OverlayMode,
+) -> SetupBundle:
+    """Write a starter config plus stub zone/trigger files for later editing."""
+    bundle_dir = Path(output_dir)
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    zones_path = bundle_dir / "visionos.zones.yaml"
+    zones_path.write_text(_starter_zones_template(), encoding="utf-8")
+
+    trigger_path = bundle_dir / "visionos.triggers.yaml"
+    trigger_path.write_text(_starter_triggers_template(), encoding="utf-8")
+
+    config_path = bundle_dir / "visionos.config.yaml"
+    write_runtime_config_file(
+        VisionOSConfig(
+            source_mode=source_mode,
+            camera_index=camera_index,
+            profile_name=profile_name,
+            overlay_mode=overlay_mode,
+        ),
+        str(config_path),
+    )
+
+    return SetupBundle(
+        config_path=str(config_path),
+        zones_path=str(zones_path),
+        trigger_path=str(trigger_path),
+    )
+
+
 def _resolve_optional_path(base_dir: Path, value: object, *, must_exist: bool) -> str | None:
     if value is None:
         return None
@@ -86,3 +169,30 @@ def _resolve_optional_path(base_dir: Path, value: object, *, must_exist: bool) -
     if must_exist and not resolved.exists():
         raise SetupConfigError(f"Setup config path does not exist: {value}")
     return str(resolved)
+
+
+def _relativize_path(base_dir: Path, candidate: str) -> str:
+    path = Path(candidate)
+    resolved = path if path.is_absolute() else (base_dir / path).resolve()
+    try:
+        return str(resolved.relative_to(base_dir.resolve()))
+    except ValueError:
+        return str(resolved)
+
+
+def _starter_zones_template() -> str:
+    return (
+        "# Starter zones file for Vision OS.\n"
+        "# Add polygon zones here, then reference this file with --zones-file or\n"
+        "# uncomment zones_file in visionos.config.yaml after the zones are ready.\n"
+        "zones: []\n"
+    )
+
+
+def _starter_triggers_template() -> str:
+    return (
+        "# Starter triggers file for Vision OS.\n"
+        "# Add trigger rules here, then reference this file with --trigger-file or\n"
+        "# uncomment trigger_file in visionos.config.yaml after the rules are ready.\n"
+        "triggers: []\n"
+    )
