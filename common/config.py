@@ -13,6 +13,7 @@ class VisionOSConfig:
 
     config_path: str | None = None
     list_cameras: bool = False
+    validate_config: bool = False
     camera_index: int = 0
     model_name: str = "yolov8n.pt"
     confidence_threshold: float = 0.35

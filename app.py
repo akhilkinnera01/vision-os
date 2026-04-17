@@ -24,7 +24,9 @@ from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
 from setupux.config_file import SetupConfigError, load_runtime_config_file
-from setupux.validate import discover_camera_indexes
+from setupux.models import ValidationCheck, ValidationReport, ValidationStatus
+from setupux.summary import format_validation_report
+from setupux.validate import discover_camera_indexes, validate_runtime_setup
 from zones import ZoneConfigError, load_zones, select_zones_for_profile
 
 
@@ -34,6 +36,7 @@ def parse_args() -> VisionOSConfig:
     argv = sys.argv[1:]
     parser.add_argument("--config", help="Optional path to a saved Vision OS runtime config YAML file.")
     parser.add_argument("--list-cameras", action="store_true", help="Probe a small camera index range and exit.")
+    parser.add_argument("--validate-config", action="store_true", help="Run setup validation and exit.")
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
@@ -89,6 +92,7 @@ def parse_args() -> VisionOSConfig:
     return VisionOSConfig(
         config_path=args.config if args.config else config_from_file.config_path,
         list_cameras=args.list_cameras,
+        validate_config=args.validate_config,
         camera_index=args.camera if "--camera" in argv else config_from_file.camera_index,
         model_name=args.model if "--model" in argv else config_from_file.model_name,
         confidence_threshold=args.conf if "--conf" in argv else config_from_file.confidence_threshold,
@@ -473,6 +477,9 @@ def main() -> int:
                 print("Available cameras: " + ", ".join(str(index) for index in cameras))
             else:
                 print("Available cameras: none detected")
+            return 0
+        if config.validate_config:
+            print(format_validation_report(validate_runtime_setup(config)))
             return 0
         profile = _load_selected_profile(config)
         if profile is not None:
