@@ -14,7 +14,7 @@ from common.config import VisionOSConfig
 from common.models import ContextLabel, OverlayMode, RuntimeMetrics, SceneMetrics, SourceMode
 from common.policy import load_policy
 from integrations import TriggeredActionRecord
-from server.store import SessionStore, ValidationStore, WorkspaceStore
+from server.store import LiveStateStore, SessionStore, ValidationStore, WorkspaceStore
 from setupux.models import ValidationCheck, ValidationReport, ValidationStatus
 
 
@@ -187,7 +187,11 @@ def test_main_builds_a_workspace_manifest_for_session_control(monkeypatch) -> No
 
         def start_session(self, workspace):
             captured["workspace"] = workspace
-            self.active_session = SimpleNamespace(workspace_id=workspace.workspace_id, state="running")
+            self.active_session = SimpleNamespace(
+                session_id="session-1",
+                workspace_id=workspace.workspace_id,
+                state="running",
+            )
             return self.active_session
 
         def finish_session(self, final_state: str):
@@ -287,6 +291,52 @@ def test_main_persists_completed_session_for_launchpad(monkeypatch, tmp_path: Pa
     assert len(sessions) == 1
     assert sessions[0].workspace_id == "meeting_room-video"
     assert sessions[0].state == "completed"
+
+
+def test_write_live_session_state_persists_snapshot_and_preview(tmp_path: Path) -> None:
+    store = LiveStateStore(tmp_path / "live")
+    packet = SimpleNamespace(frame=np.zeros((120, 160, 3), dtype=np.uint8))
+    output = SimpleNamespace(
+        detections=[],
+        decision=SimpleNamespace(
+            label=ContextLabel.FOCUSED_WORK,
+            scene_metrics=SceneMetrics(
+                focus_score=0.9,
+                distraction_score=0.1,
+                collaboration_score=0.2,
+                stability_score=0.8,
+            ),
+        ),
+        explanation=SimpleNamespace(
+            compact_summary="Laptop near seated person",
+            recent_events=["focus_started"],
+            risk_flags=["low_light"],
+            recent_triggers=["focus-log"],
+        ),
+        runtime_metrics=RuntimeMetrics(fps=14.5, average_inference_ms=11.2),
+        zone_states=(),
+        integration_records=(SimpleNamespace(integration_id="room-status"),),
+    )
+    renderer = SimpleNamespace(
+        render=lambda *args, **kwargs: np.zeros((120, 160, 3), dtype=np.uint8),
+    )
+
+    app._write_live_session_state(
+        store,
+        session_id="session-5",
+        workspace_id="desk-a",
+        packet=packet,
+        output=output,
+        renderer=renderer,
+    )
+
+    snapshot = store.load_snapshot()
+    assert snapshot is not None
+    assert snapshot.workspace_id == "desk-a"
+    assert snapshot.scene_label == "Focused Work"
+    assert snapshot.metrics["recent_triggers"] == ["focus-log"]
+    assert snapshot.metrics["recent_integrations"] == ["room-status"]
+    assert store.load_preview() is not None
 
 
 def test_run_sequential_mode_records_trigger_records(monkeypatch, tmp_path) -> None:

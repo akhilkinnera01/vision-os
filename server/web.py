@@ -9,13 +9,15 @@ import webbrowser
 from wsgiref.simple_server import make_server
 
 from server.launchpad import LaunchpadService
+from server.store import LiveStateStore
 
 
 class LaunchpadApp:
     """Serve the Launchpad and workspace shell over a local browser session."""
 
-    def __init__(self, service: LaunchpadService) -> None:
+    def __init__(self, service: LaunchpadService, live_state_store: LiveStateStore | None = None) -> None:
         self.service = service
+        self.live_state_store = live_state_store
 
     def __call__(self, environ, start_response):
         path = environ.get("PATH_INFO", "/")
@@ -24,6 +26,12 @@ class LaunchpadApp:
         if path == "/api/launchpad":
             payload = json.dumps(self.service.build_snapshot(), indent=2)
             return self._json_response(start_response, payload)
+        if path.startswith("/api/workspaces/") and path.endswith("/live"):
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/live").rstrip("/"))
+            return self._json_response(start_response, json.dumps(self._live_snapshot(workspace_id), indent=2))
+        if path.startswith("/api/workspaces/") and path.endswith("/preview"):
+            workspace_id = unquote(path.removeprefix("/api/workspaces/").removesuffix("/preview").rstrip("/"))
+            return self._preview_response(start_response, workspace_id)
         if path.startswith("/workspaces/"):
             workspace_id = unquote(path.removeprefix("/workspaces/"))
             workspace_surface = self.service.build_workspace_surface(workspace_id)
@@ -65,6 +73,29 @@ class LaunchpadApp:
             [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(body)))],
         )
         return [body]
+
+    def _live_snapshot(self, workspace_id: str) -> dict[str, object]:
+        if self.live_state_store is None:
+            return {"active": False}
+        snapshot = self.live_state_store.load_snapshot()
+        if snapshot is None or snapshot.workspace_id != workspace_id:
+            return {"active": False}
+        payload = snapshot.to_dict()
+        payload["active"] = True
+        return payload
+
+    def _preview_response(self, start_response, workspace_id: str):
+        if self.live_state_store is None:
+            return self._not_found(start_response, f"No preview is available for {workspace_id}.")
+        snapshot = self.live_state_store.load_snapshot()
+        preview = self.live_state_store.load_preview()
+        if snapshot is None or snapshot.workspace_id != workspace_id or preview is None:
+            return self._not_found(start_response, f"No preview is available for {workspace_id}.")
+        start_response(
+            "200 OK",
+            [("Content-Type", "image/jpeg"), ("Content-Length", str(len(preview)))],
+        )
+        return [preview]
 
 
 def _render_launchpad(snapshot: dict[str, object]) -> str:
@@ -196,17 +227,73 @@ def _render_workspace(surface: dict[str, object]) -> str:
         </div>
       </section>
       <section class="workspace-shell">
-        <article class="card workspace-status">
-          <p class="card-kicker">Ready state</p>
-          <h2>{escape(status["validation_summary"] or "No validation recorded yet")}</h2>
-          <p>Profile: {escape(workspace["profile_id"] or "none")} • Policy: {escape(workspace["policy_name"] or "default")}</p>
+        <article class="card workspace-preview">
+          <p class="card-kicker">Live preview</p>
+          <h2>Workspace monitor</h2>
+          <img id="live-preview" class="preview-frame" alt="Live Vision OS preview" src="/api/workspaces/{escape(workspace["workspace_id"])}/preview">
+          <p id="preview-caption">Open a live run for this space to populate the browser preview.</p>
         </article>
         <article class="card workspace-tabs">
           <p class="card-kicker">Workspace navigation</p>
           <h2>Operator flow</h2>
           <ul class="tab-list">{tabs}</ul>
         </article>
+        <article class="card workspace-status">
+          <p class="card-kicker">Live state</p>
+          <h2 id="live-scene-label">Awaiting session</h2>
+          <p id="live-summary">{escape(status["validation_summary"] or "No validation recorded yet")}</p>
+          <p id="live-metrics">Profile: {escape(workspace["profile_id"] or "none")} • Policy: {escape(workspace["policy_name"] or "default")}</p>
+        </article>
+        <article class="card workspace-events">
+          <p class="card-kicker">Recent activity</p>
+          <h2>Events and warnings</h2>
+          <ul id="live-events" class="tab-list">
+            <li>No live session yet.</li>
+          </ul>
+        </article>
       </section>
+      <script>
+        const workspaceId = {json.dumps(workspace["workspace_id"])};
+        const sceneLabel = document.getElementById("live-scene-label");
+        const summary = document.getElementById("live-summary");
+        const metrics = document.getElementById("live-metrics");
+        const events = document.getElementById("live-events");
+        const preview = document.getElementById("live-preview");
+        const previewCaption = document.getElementById("preview-caption");
+
+        async function refreshWorkspace() {{
+          const response = await fetch(`/api/workspaces/${{workspaceId}}/live`, {{ cache: "no-store" }});
+          const payload = await response.json();
+          if (!payload.active) {{
+            sceneLabel.textContent = "Awaiting session";
+            summary.textContent = "Start a run from the CLI for this space to stream live state into the browser.";
+            metrics.textContent = "No active metrics yet.";
+            events.innerHTML = "<li>No live session yet.</li>";
+            previewCaption.textContent = "Open a live run for this space to populate the browser preview.";
+            return;
+          }}
+
+          sceneLabel.textContent = payload.scene_label || "Running";
+          summary.textContent = payload.explanation || "Live explanation unavailable.";
+          const details = payload.metrics || {{}};
+          metrics.textContent = `FPS ${{
+            Number(details.fps || 0).toFixed(2)
+          }} • Avg ${{
+            Number(details.average_inference_ms || 0).toFixed(1)
+          }}ms • Stability ${{
+            Number(details.stability_score || 0).toFixed(2)
+          }}`;
+          const items = [...(payload.recent_events || []), ...(payload.warnings || [])];
+          events.innerHTML = items.length
+            ? items.map((item) => `<li>${{item}}</li>`).join("")
+            : "<li>No recent events or warnings.</li>";
+          preview.src = `/api/workspaces/${{workspaceId}}/preview?ts=${{Date.now()}}`;
+          previewCaption.textContent = "Live preview updates automatically while the session is running.";
+        }}
+
+        refreshWorkspace();
+        window.setInterval(refreshWorkspace, 1500);
+      </script>
     </main>
     """
     return _base_document(f"{workspace['name']} - Vision OS", content)
@@ -372,6 +459,22 @@ def _base_document(title: str, content: str) -> str:
         gap: 1rem;
         grid-template-columns: minmax(0, 1fr) minmax(300px, 0.9fr);
         margin-top: 1.25rem;
+      }}
+
+      .workspace-preview,
+      .workspace-status,
+      .workspace-events,
+      .workspace-tabs {{
+        min-height: 240px;
+      }}
+
+      .preview-frame {{
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        border-radius: 18px;
+        background: rgba(18, 32, 51, 0.08);
+        border: 1px solid var(--line);
       }}
 
       .tab-list {{

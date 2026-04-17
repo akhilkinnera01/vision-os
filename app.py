@@ -22,7 +22,9 @@ from runtime.history import HistoryRecorder, SessionAnalyticsEngine
 from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
 from server import (
+    LiveStateStore,
     SessionController,
+    SessionSnapshot,
     SessionStore,
     ValidationRecord,
     ValidationStore,
@@ -294,6 +296,12 @@ def _validation_store(state_dir: Path | None = None) -> ValidationStore:
     return ValidationStore(base_dir / "validations.json")
 
 
+def _live_state_store(state_dir: Path | None = None) -> LiveStateStore:
+    """Build the file-backed live workspace store."""
+    base_dir = _server_state_dir() if state_dir is None else state_dir
+    return LiveStateStore(base_dir / "live")
+
+
 def _build_launchpad_service(state_dir: Path | None = None) -> LaunchpadService:
     """Assemble the local browser app service from the default state stores."""
     return LaunchpadService(
@@ -303,9 +311,54 @@ def _build_launchpad_service(state_dir: Path | None = None) -> LaunchpadService:
     )
 
 
+def _write_live_session_state(
+    store: LiveStateStore,
+    *,
+    session_id: str,
+    workspace_id: str,
+    packet,
+    output: InferenceOutput,
+    renderer: FrameRenderer,
+) -> None:
+    """Persist the latest live snapshot and preview frame for the browser workspace."""
+    snapshot = SessionSnapshot(
+        session_id=session_id,
+        workspace_id=workspace_id,
+        state="running",
+        scene_label=output.decision.label.value,
+        explanation=output.explanation.compact_summary,
+        metrics={
+            "fps": output.runtime_metrics.fps,
+            "average_inference_ms": output.runtime_metrics.average_inference_ms,
+            "focus_score": output.decision.scene_metrics.focus_score,
+            "distraction_score": output.decision.scene_metrics.distraction_score,
+            "collaboration_score": output.decision.scene_metrics.collaboration_score,
+            "stability_score": output.decision.scene_metrics.stability_score,
+            "recent_triggers": list(output.explanation.recent_triggers),
+            "recent_integrations": [record.integration_id for record in output.integration_records],
+            "zone_labels": {zone_state.zone_id: zone_state.context.label.value for zone_state in output.zone_states},
+        },
+        recent_events=tuple(output.explanation.recent_events),
+        warnings=tuple(output.explanation.risk_flags),
+        active_zone_ids=tuple(zone_state.zone_id for zone_state in output.zone_states),
+    )
+    store.save_snapshot(snapshot)
+    preview = renderer.render(
+        packet.frame,
+        output.detections,
+        output.decision,
+        output.explanation,
+        output.runtime_metrics,
+        output.zone_states,
+    )
+    encoded, payload = cv2.imencode(".jpg", preview)
+    if encoded:
+        store.save_preview(payload.tobytes())
+
+
 def run_local_app(config: VisionOSConfig) -> int:
     """Run the local browser app shell until the operator stops it."""
-    app = LaunchpadApp(_build_launchpad_service())
+    app = LaunchpadApp(_build_launchpad_service(), live_state_store=_live_state_store())
     return serve_launchpad(app, host=config.app_host, port=config.app_port, open_browser=config.open_browser)
 
 
@@ -434,6 +487,9 @@ def _run_streaming_mode(
     logger: VisionLogger,
     integration_config=None,
     profile_id: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    live_state_store: LiveStateStore | None = None,
 ) -> int:
     """Run webcam mode with an asynchronous inference worker for responsive UI."""
     if not source.is_opened():
@@ -502,6 +558,15 @@ def _run_streaming_mode(
                     analytics_engine.add_record(history_record)
                     if history_recorder is not None:
                         history_recorder.write(history_record)
+                if live_state_store is not None and session_id is not None and workspace_id is not None:
+                    _write_live_session_state(
+                        live_state_store,
+                        session_id=session_id,
+                        workspace_id=workspace_id,
+                        packet=packet,
+                        output=output,
+                        renderer=renderer,
+                    )
                 _queue_latest(result_queue, output)
             except Exception as exc:  # pragma: no cover - exercised in runtime
                 health_monitor.report_exception("pipeline", exc)
@@ -556,6 +621,8 @@ def _run_streaming_mode(
             recorder.close()
         if history_recorder is not None:
             history_recorder.close()
+        if live_state_store is not None:
+            live_state_store.clear()
         if not config.headless:
             cv2.destroyAllWindows()
 
@@ -578,6 +645,9 @@ def _run_sequential_mode(
     logger: VisionLogger,
     integration_config=None,
     profile_id: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    live_state_store: LiveStateStore | None = None,
 ) -> int:
     """Run video or replay modes deterministically without dropping frames."""
     if not source.is_opened():
@@ -640,6 +710,15 @@ def _run_sequential_mode(
                 analytics_engine.add_record(history_record)
                 if history_recorder is not None:
                     history_recorder.write(history_record)
+            if live_state_store is not None and session_id is not None and workspace_id is not None:
+                _write_live_session_state(
+                    live_state_store,
+                    session_id=session_id,
+                    workspace_id=workspace_id,
+                    packet=packet,
+                    output=output,
+                    renderer=renderer,
+                )
             processed_frames += 1
 
             if not config.headless:
@@ -663,6 +742,8 @@ def _run_sequential_mode(
             recorder.close()
         if history_recorder is not None:
             history_recorder.close()
+        if live_state_store is not None:
+            live_state_store.clear()
         if not config.headless:
             cv2.destroyAllWindows()
 
@@ -752,7 +833,8 @@ def main() -> int:
     _log_run_started(config, policy.name, len(zones), logger, profile_id=None if profile is None else profile.profile_id)
     session_controller = SessionController()
     workspace = _persist_workspace_manifest(config, profile_id=None if profile is None else profile.profile_id)
-    session_controller.start_session(workspace)
+    running_session = session_controller.start_session(workspace)
+    live_state_store = _live_state_store()
     try:
         if _should_use_streaming_runtime(config):
             result = _run_streaming_mode(
@@ -765,6 +847,9 @@ def main() -> int:
                 logger,
                 integration_config=integration_config,
                 profile_id=None if profile is None else profile.profile_id,
+                session_id=running_session.session_id,
+                workspace_id=workspace.workspace_id,
+                live_state_store=live_state_store,
             )
         else:
             result = _run_sequential_mode(
@@ -777,6 +862,9 @@ def main() -> int:
                 logger,
                 integration_config=integration_config,
                 profile_id=None if profile is None else profile.profile_id,
+                session_id=running_session.session_id,
+                workspace_id=workspace.workspace_id,
+                live_state_store=live_state_store,
             )
     finally:
         final_state = "completed" if "result" in locals() and result == 0 else "failed"

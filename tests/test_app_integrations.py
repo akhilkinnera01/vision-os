@@ -67,7 +67,7 @@ def test_main_passes_integration_config_and_profile_id_into_sequential_runtime(m
     monkeypatch.setattr(
         app,
         "_run_sequential_mode",
-        lambda _config, _policy, _zones, _trigger_config, _source, _renderer, _logger, *, integration_config=None, profile_id=None: captured.update(
+        lambda _config, _policy, _zones, _trigger_config, _source, _renderer, _logger, *, integration_config=None, profile_id=None, **_kwargs: captured.update(
             {"integration_config": integration_config, "profile_id": profile_id}
         )
         or 0,

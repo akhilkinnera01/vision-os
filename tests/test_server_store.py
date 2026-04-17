@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from server.models import SessionRecord, ValidationRecord, WorkspaceManifest
-from server.store import SessionStore, ValidationStore, WorkspaceStore
+from server.models import SessionRecord, SessionSnapshot, ValidationRecord, WorkspaceManifest
+from server.store import LiveStateStore, SessionStore, ValidationStore, WorkspaceStore
 
 
 def test_workspace_store_returns_empty_list_when_catalog_missing(tmp_path: Path) -> None:
@@ -78,3 +78,31 @@ def test_validation_store_overwrites_by_workspace_id(tmp_path: Path) -> None:
     assert result is not None
     assert result.status == "error"
     assert result.summary == "Camera missing"
+
+
+def test_live_state_store_round_trips_snapshot_and_preview(tmp_path: Path) -> None:
+    store = LiveStateStore(tmp_path / "live")
+    snapshot = SessionSnapshot(
+        session_id="session-7",
+        workspace_id="desk-a",
+        state="running",
+        scene_label="Focused Work",
+        explanation="Laptop near seated person",
+        metrics={"fps": 12.5},
+        recent_events=("focus_started",),
+        warnings=("low light",),
+        active_zone_ids=("desk",),
+    )
+
+    store.save_snapshot(snapshot)
+    store.save_preview(b"preview-bytes")
+
+    loaded = store.load_snapshot()
+    assert loaded is not None
+    assert loaded.workspace_id == "desk-a"
+    assert loaded.metrics["fps"] == 12.5
+    assert store.load_preview() == b"preview-bytes"
+
+    store.clear()
+    assert store.load_snapshot() is None
+    assert store.load_preview() is None

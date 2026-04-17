@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from server.models import SessionRecord, ValidationRecord, WorkspaceManifest
+from server.models import SessionRecord, SessionSnapshot, ValidationRecord, WorkspaceManifest
 
 
 class WorkspaceStore:
@@ -104,3 +104,40 @@ class ValidationStore:
         payload[record.workspace_id] = record.to_dict()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+class LiveStateStore:
+    """Persist the current live snapshot and preview image for the browser workspace."""
+
+    def __init__(self, state_dir: Path) -> None:
+        self.state_dir = state_dir
+        self.snapshot_path = state_dir / "live-session.json"
+        self.preview_path = state_dir / "live-preview.jpg"
+
+    def load_snapshot(self) -> SessionSnapshot | None:
+        if not self.snapshot_path.is_file():
+            return None
+
+        payload = json.loads(self.snapshot_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"Live snapshot must be a mapping: {self.snapshot_path}")
+        return SessionSnapshot.from_dict(payload)
+
+    def save_snapshot(self, snapshot: SessionSnapshot) -> None:
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.snapshot_path.write_text(json.dumps(snapshot.to_dict(), indent=2) + "\n", encoding="utf-8")
+
+    def load_preview(self) -> bytes | None:
+        if not self.preview_path.is_file():
+            return None
+        return self.preview_path.read_bytes()
+
+    def save_preview(self, payload: bytes) -> None:
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.preview_path.write_bytes(payload)
+
+    def clear(self) -> None:
+        if self.snapshot_path.exists():
+            self.snapshot_path.unlink()
+        if self.preview_path.exists():
+            self.preview_path.unlink()

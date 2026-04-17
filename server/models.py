@@ -161,6 +161,20 @@ class SessionSnapshot:
             "active_zone_ids": list(self.active_zone_ids),
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> SessionSnapshot:
+        return cls(
+            session_id=str(payload["session_id"]),
+            workspace_id=str(payload["workspace_id"]),
+            state=str(payload["state"]),
+            scene_label=_optional_str(payload.get("scene_label")),
+            explanation=_optional_str(payload.get("explanation")),
+            metrics=_optional_dict(payload.get("metrics")) or {},
+            recent_events=tuple(str(item) for item in payload.get("recent_events", [])),
+            warnings=tuple(str(item) for item in payload.get("warnings", [])),
+            active_zone_ids=tuple(str(item) for item in payload.get("active_zone_ids", [])),
+        )
+
 
 @dataclass(slots=True, frozen=True)
 class SessionEvent:

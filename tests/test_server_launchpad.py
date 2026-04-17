@@ -6,8 +6,8 @@ from io import BytesIO
 from pathlib import Path
 
 from server.launchpad import LaunchpadService
-from server.models import SessionRecord, ValidationRecord, WorkspaceManifest
-from server.store import SessionStore, ValidationStore, WorkspaceStore
+from server.models import SessionRecord, SessionSnapshot, ValidationRecord, WorkspaceManifest
+from server.store import LiveStateStore, SessionStore, ValidationStore, WorkspaceStore
 from server.web import LaunchpadApp
 
 
@@ -110,7 +110,80 @@ def test_launchpad_app_renders_workspace_shell_page(tmp_path: Path) -> None:
     assert "Integrations" in body
 
 
+def test_launchpad_app_returns_live_workspace_snapshot(tmp_path: Path) -> None:
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    live_state_store = LiveStateStore(tmp_path / "live")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="webcam",
+        )
+    )
+    live_state_store.save_snapshot(
+        SessionSnapshot(
+            session_id="session-1",
+            workspace_id="desk-a",
+            state="running",
+            scene_label="Focused Work",
+            explanation="Laptop near seated person",
+            metrics={"fps": 14.5},
+            recent_events=("focus_started",),
+        )
+    )
+    app = LaunchpadApp(
+        LaunchpadService(workspace_store, session_store, validation_store),
+        live_state_store=live_state_store,
+    )
+
+    status, headers, body = _call_app(app, "/api/workspaces/desk-a/live")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert '"active": true' in body
+    assert '"scene_label": "Focused Work"' in body
+
+
+def test_launchpad_app_returns_preview_bytes_for_active_workspace(tmp_path: Path) -> None:
+    workspace_store = WorkspaceStore(tmp_path / "workspaces.json")
+    session_store = SessionStore(tmp_path / "sessions.json")
+    validation_store = ValidationStore(tmp_path / "validations.json")
+    live_state_store = LiveStateStore(tmp_path / "live")
+    workspace_store.save_workspace(
+        WorkspaceManifest(
+            workspace_id="desk-a",
+            name="Desk A",
+            source_mode="webcam",
+        )
+    )
+    live_state_store.save_snapshot(
+        SessionSnapshot(
+            session_id="session-1",
+            workspace_id="desk-a",
+            state="running",
+        )
+    )
+    live_state_store.save_preview(b"jpeg-payload")
+    app = LaunchpadApp(
+        LaunchpadService(workspace_store, session_store, validation_store),
+        live_state_store=live_state_store,
+    )
+
+    status, headers, body = _call_app_raw(app, "/api/workspaces/desk-a/preview")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "image/jpeg") in headers
+    assert body == b"jpeg-payload"
+
+
 def _call_app(app: LaunchpadApp, path: str) -> tuple[str, list[tuple[str, str]], str]:
+    status, headers, body = _call_app_raw(app, path)
+    return status, headers, body.decode("utf-8")
+
+
+def _call_app_raw(app: LaunchpadApp, path: str) -> tuple[str, list[tuple[str, str]], bytes]:
     captured: dict[str, object] = {}
 
     def start_response(status: str, headers: list[tuple[str, str]]) -> None:
@@ -132,5 +205,5 @@ def _call_app(app: LaunchpadApp, path: str) -> tuple[str, list[tuple[str, str]],
         "wsgi.run_once": False,
     }
 
-    body = b"".join(app(environ, start_response)).decode("utf-8")
+    body = b"".join(app(environ, start_response))
     return captured["status"], captured["headers"], body

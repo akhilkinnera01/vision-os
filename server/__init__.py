@@ -11,12 +11,13 @@ from server.models import (
     WorkspaceSummary,
 )
 from server.runtime_host import RuntimeHost
-from server.store import SessionStore, ValidationStore, WorkspaceStore
+from server.store import LiveStateStore, SessionStore, ValidationStore, WorkspaceStore
 
 __all__ = [
     "ArtifactIndex",
     "SessionController",
     "RuntimeHost",
+    "LiveStateStore",
     "SessionEvent",
     "SessionRecord",
     "SessionStore",

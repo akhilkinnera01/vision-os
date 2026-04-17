@@ -71,7 +71,7 @@ def test_main_passes_history_artifact_paths_to_runtime(monkeypatch) -> None:
     monkeypatch.setattr(app, "load_policy", lambda name, path=None: SimpleNamespace(name=name))
     monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
-    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: 0)
+    monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args, **_kwargs: 0)
 
     def _capture_run(runtime_config, *_args, **_kwargs):
         captured["config"] = runtime_config
