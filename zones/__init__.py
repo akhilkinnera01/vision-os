@@ -2,7 +2,7 @@
 
 from zones.assigner import ZoneAssigner
 from zones.builder import ZoneFeatureBuilder
-from zones.config import ZoneConfigError, load_zones
+from zones.config import ZoneConfigError, load_zones, select_zones_for_profile
 from zones.decision import ZoneDecisionEngine
 from zones.memory import ZoneTemporalMemory
 from zones.models import (
@@ -37,4 +37,5 @@ __all__ = [
     "ZoneTemporalState",
     "ZoneType",
     "load_zones",
+    "select_zones_for_profile",
 ]

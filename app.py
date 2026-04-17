@@ -22,7 +22,7 @@ from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, Webc
 from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
-from zones import ZoneConfigError, load_zones
+from zones import ZoneConfigError, load_zones, select_zones_for_profile
 
 
 def parse_args() -> VisionOSConfig:
@@ -404,6 +404,10 @@ def main() -> int:
         _validate_input_path(config)
         policy = load_policy(name=config.policy_name, path=config.policy_path)
         zones = load_zones(config.zones_path) if config.zones_path else ()
+        zones = select_zones_for_profile(
+            zones,
+            active_profile=None if profile is None else profile.profile_id,
+        )
         trigger_config = load_trigger_config(config.trigger_path) if config.trigger_path else None
         logger = VisionLogger(config.log_json)
         renderer = FrameRenderer(config.overlay_mode)
