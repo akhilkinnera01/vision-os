@@ -81,3 +81,57 @@ scene_labels:
 
     with pytest.raises(ProfileValidationError, match="compact_sections"):
         load_profile(path=str(profile_path))
+
+
+@pytest.mark.parametrize(
+    "profile_name",
+    ["workstation", "study_room", "meeting_room", "lab_bench", "waiting_area"],
+)
+def test_load_profile_supports_all_builtin_profiles(profile_name: str) -> None:
+    profile = load_profile(name=profile_name)
+
+    assert profile.profile_id == profile_name
+    assert profile.name
+
+
+def test_load_profile_rejects_missing_trigger_reference(tmp_path: Path) -> None:
+    profile_path = tmp_path / "profile.yaml"
+    profile_path.write_text(
+        """
+id: custom
+name: Custom
+description: Custom profile
+policy: default
+trigger_file: missing.yaml
+presentation:
+  overlay_mode: compact
+  compact_sections: [scores]
+scene_labels:
+  - Focused Work
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProfileValidationError, match="trigger_file"):
+        load_profile(path=str(profile_path))
+
+
+def test_load_profile_rejects_unknown_policy_name(tmp_path: Path) -> None:
+    profile_path = tmp_path / "profile.yaml"
+    profile_path.write_text(
+        """
+id: custom
+name: Custom
+description: Custom profile
+policy: missing
+presentation:
+  overlay_mode: compact
+  compact_sections: [scores]
+scene_labels:
+  - Focused Work
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProfileValidationError, match="policy"):
+        load_profile(path=str(profile_path))

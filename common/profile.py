@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from common.models import OverlayMode
+from common.models import ContextLabel, OverlayMode
 
 
 class ProfileValidationError(ValueError):
@@ -71,9 +71,11 @@ def load_profile(name: str | None = None, path: str | None = None) -> RuntimePro
     profile_name = _require_string(payload, "name")
     description = _require_string(payload, "description")
     policy_name = str(payload.get("policy", "default"))
-    trigger_path = _resolve_optional_path(profile_path.parent, payload.get("trigger_file"))
-    zones_path = _resolve_optional_path(profile_path.parent, payload.get("zones_file"))
+    _validate_policy_name(policy_name)
+    trigger_path = _resolve_optional_path(profile_path.parent, payload.get("trigger_file"), field_name="trigger_file")
+    zones_path = _resolve_optional_path(profile_path.parent, payload.get("zones_file"), field_name="zones_file")
     scene_labels = _string_list(payload.get("scene_labels", []), field_name="scene_labels")
+    _validate_scene_labels(scene_labels)
     presentation = _parse_presentation(payload.get("presentation", {}), profile_id)
 
     return RuntimeProfile(
@@ -100,12 +102,14 @@ def _require_string(payload: dict[str, object], key: str) -> str:
     return value.strip()
 
 
-def _resolve_optional_path(base_dir: Path, value: object) -> str | None:
+def _resolve_optional_path(base_dir: Path, value: object, *, field_name: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise ProfileValidationError("Profile file references must be non-empty strings.")
+        raise ProfileValidationError(f"Profile field '{field_name}' must be a non-empty string when present.")
     resolved = (base_dir / value).resolve() if not Path(value).is_absolute() else Path(value)
+    if not resolved.is_file():
+        raise ProfileValidationError(f"Profile field '{field_name}' references a missing file: {value}")
     return str(resolved)
 
 
@@ -171,3 +175,16 @@ def _parse_sections(payload: object, *, profile_id: str, field_name: str) -> lis
                 f"Profile '{profile_id}' field 'presentation.{field_name}' contains unsupported section '{item}'."
             ) from exc
     return sections
+
+
+def _validate_policy_name(policy_name: str) -> None:
+    policy_path = Path(__file__).resolve().parent.parent / "policies" / f"{policy_name}.yaml"
+    if not policy_path.is_file():
+        raise ProfileValidationError(f"Profile field 'policy' references an unknown policy: {policy_name}")
+
+
+def _validate_scene_labels(scene_labels: list[str]) -> None:
+    valid_labels = {label.value for label in ContextLabel}
+    for label in scene_labels:
+        if label not in valid_labels:
+            raise ProfileValidationError(f"Profile field 'scene_labels' contains an unknown label: {label}")

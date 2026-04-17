@@ -1,0 +1,18 @@
+id: lab_bench
+name: Lab Bench
+description: Bench-centric profile that emphasizes activity and trigger visibility.
+policy: office
+presentation:
+  overlay_mode: debug
+  compact_sections:
+    - scores
+    - triggers
+  debug_sections:
+    - scores
+    - zones
+    - triggers
+    - runtime
+    - spatial
+scene_labels:
+  - Focused Work
+  - Casual Use
