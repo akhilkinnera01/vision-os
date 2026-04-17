@@ -83,6 +83,80 @@ scene_labels:
         load_profile(path=str(profile_path))
 
 
+def test_load_profile_resolves_relative_policy_files(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policies" / "study-room.yaml"
+    policy_path.parent.mkdir()
+    policy_path.write_text(
+        """
+name: study-room
+tracking:
+  max_idle_seconds: 1.5
+  min_iou: 0.2
+  max_center_distance: 0.12
+features:
+  laptop_near_person_distance: 0.22
+  phone_near_person_distance: 0.18
+  people_cluster_reference_distance: 0.35
+  centered_monitor_min_area_ratio: 0.05
+  centered_monitor_axis_score_min: 0.65
+  desk_bottom_half_ratio: 0.33
+temporal:
+  focus_reference_seconds: 8.0
+  distraction_spike_delta: 0.22
+  collaboration_increasing_delta: 0.18
+  instability_threshold: 0.5
+  instability_switch_count: 3
+decision:
+  switch_confirmations: 2
+  focus_margin: 0.08
+  collaboration_margin: 0.02
+  unstable_confidence_penalty: 0.12
+events:
+  focus_sustained_seconds: 6.0
+  distraction_start_threshold: 0.6
+  group_person_count: 2
+""".strip(),
+        encoding="utf-8",
+    )
+    profile_path = tmp_path / "profile.yaml"
+    profile_path.write_text(
+        """
+id: custom
+name: Custom
+description: Custom profile
+policy_file: policies/study-room.yaml
+scene_labels:
+  - Focused Work
+""".strip(),
+        encoding="utf-8",
+    )
+
+    profile = load_profile(path=str(profile_path))
+
+    assert profile.policy_path == str(policy_path)
+
+
+def test_load_profile_rejects_profiles_with_named_and_file_policy(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("name: custom\n", encoding="utf-8")
+    profile_path = tmp_path / "profile.yaml"
+    profile_path.write_text(
+        """
+id: custom
+name: Custom
+description: Custom profile
+policy: office
+policy_file: policy.yaml
+scene_labels:
+  - Focused Work
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProfileValidationError, match="policy_file"):
+        load_profile(path=str(profile_path))
+
+
 @pytest.mark.parametrize(
     "profile_name",
     ["workstation", "study_room", "meeting_room", "lab_bench", "waiting_area"],

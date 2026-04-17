@@ -142,6 +142,26 @@ def test_apply_profile_defaults_preserves_explicit_settings() -> None:
     assert resolved.overlay_mode == OverlayMode.COMPACT
 
 
+def test_apply_profile_defaults_supports_profile_policy_files() -> None:
+    config = VisionOSConfig(
+        source_mode=SourceMode.VIDEO,
+        input_path="demo/sample.mp4",
+    )
+    profile = RuntimeProfile(
+        profile_id="study_room",
+        name="Study Room",
+        description="Study-space defaults",
+        policy_name="default",
+        policy_path="/tmp/policies/study-room.yaml",
+        presentation=ProfilePresentation(overlay_mode=OverlayMode.COMPACT),
+    )
+
+    resolved = app._apply_profile_defaults(config, profile)
+
+    assert resolved.policy_path == "/tmp/policies/study-room.yaml"
+    assert resolved.policy_name == "default"
+
+
 def test_main_applies_profile_defaults_before_validation(monkeypatch) -> None:
     config = VisionOSConfig(
         source_mode=SourceMode.VIDEO,

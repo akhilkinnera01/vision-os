@@ -132,7 +132,10 @@ def _apply_profile_defaults(config: VisionOSConfig, profile: RuntimeProfile) -> 
     """Fill unresolved runtime settings from a selected profile while preserving explicit flags."""
     resolved = config
     if not resolved.policy_explicit:
-        resolved = replace(resolved, policy_name=profile.policy_name)
+        if profile.policy_path is not None:
+            resolved = replace(resolved, policy_path=profile.policy_path)
+        else:
+            resolved = replace(resolved, policy_name=profile.policy_name)
     if not resolved.zones_explicit and profile.zones_path is not None:
         resolved = replace(resolved, zones_path=profile.zones_path)
     if not resolved.trigger_explicit and profile.trigger_path is not None:

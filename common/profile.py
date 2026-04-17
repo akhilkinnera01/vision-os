@@ -70,8 +70,7 @@ def load_profile(name: str | None = None, path: str | None = None) -> RuntimePro
     profile_id = _require_string(payload, "id")
     profile_name = _require_string(payload, "name")
     description = _require_string(payload, "description")
-    policy_name = str(payload.get("policy", "default"))
-    _validate_policy_name(policy_name)
+    policy_name, policy_path = _resolve_policy_reference(payload, base_dir=profile_path.parent)
     trigger_path = _resolve_optional_path(profile_path.parent, payload.get("trigger_file"), field_name="trigger_file")
     zones_path = _resolve_optional_path(profile_path.parent, payload.get("zones_file"), field_name="zones_file")
     scene_labels = _string_list(payload.get("scene_labels", []), field_name="scene_labels")
@@ -83,7 +82,7 @@ def load_profile(name: str | None = None, path: str | None = None) -> RuntimePro
         name=profile_name,
         description=description,
         policy_name=policy_name,
-        policy_path=None,
+        policy_path=policy_path,
         zones_path=zones_path,
         trigger_path=trigger_path,
         scene_labels=tuple(scene_labels),
@@ -100,6 +99,19 @@ def _require_string(payload: dict[str, object], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ProfileValidationError(f"Profile field '{key}' must be a non-empty string.")
     return value.strip()
+
+
+def _resolve_policy_reference(payload: dict[str, object], *, base_dir: Path) -> tuple[str, str | None]:
+    has_policy_name = "policy" in payload
+    has_policy_file = "policy_file" in payload
+    if has_policy_name and has_policy_file:
+        raise ProfileValidationError("Profile must define either 'policy' or 'policy_file', not both.")
+    if has_policy_file:
+        return ("default", _resolve_optional_path(base_dir, payload.get("policy_file"), field_name="policy_file"))
+
+    policy_name = str(payload.get("policy", "default"))
+    _validate_policy_name(policy_name)
+    return (policy_name, None)
 
 
 def _resolve_optional_path(base_dir: Path, value: object, *, field_name: str) -> str | None:
