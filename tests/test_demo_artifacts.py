@@ -10,6 +10,7 @@ import yaml
 
 from common.profile import load_profile
 from integrations import load_trigger_config
+from zones import load_zones, select_zones_for_profile
 
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "demo"
@@ -74,8 +75,11 @@ def test_demo_trigger_config_exists_and_has_rules() -> None:
 def test_demo_profile_manifest_exists_and_resolves_assets() -> None:
     profile_path = DEMO_DIR / "sample-profile.yaml"
     profile = load_profile(path=str(profile_path))
+    zones = load_zones(str(DEMO_DIR / "sample-zones.yaml"))
+    scoped_zones = select_zones_for_profile(zones, active_profile=profile.profile_id)
 
     assert profile_path.is_file()
     assert profile.profile_id == "sample_demo"
     assert profile.zones_path == str(DEMO_DIR / "sample-zones.yaml")
     assert profile.trigger_path == str(DEMO_DIR / "sample-triggers.yaml")
+    assert len(scoped_zones) >= 1

@@ -2,7 +2,6 @@ zones:
   - id: desk_a
     name: Desk A
     type: occupancy
-    profile: workstation
     polygon:
       - [40, 220]
       - [320, 220]
