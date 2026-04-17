@@ -225,13 +225,15 @@ def _finalize_run(
     if analytics_engine is not None and hasattr(analytics_engine, "build_summary"):
         analytics_summary = analytics_engine.build_summary(summary)
     if config.session_summary_output_path and analytics_engine is not None:
-        analytics_engine.write_summary(config.session_summary_output_path, summary)
+        written_summary = analytics_engine.write_summary(config.session_summary_output_path, summary)
         logger.log(
             "artifact_written",
             kind="session_summary",
             path=config.session_summary_output_path,
             mode=config.source_mode.value,
         )
+        if analytics_summary is None:
+            analytics_summary = written_summary
     logger.log(
         "run_completed",
         mode=config.source_mode.value,

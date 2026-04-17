@@ -83,8 +83,10 @@ class SessionAnalyticsEngine:
             stage_timings=benchmark_summary.stage_timings,
         )
 
-    def write_summary(self, output_path: str, benchmark_summary: BenchmarkSummary) -> None:
+    def write_summary(self, output_path: str, benchmark_summary: BenchmarkSummary) -> SessionAnalyticsSummary:
+        summary = self.build_summary(benchmark_summary)
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         with output.open("w", encoding="utf-8") as handle:
-            json.dump(self.build_summary(benchmark_summary).to_dict(), handle, indent=2)
+            json.dump(summary.to_dict(), handle, indent=2)
+        return summary

@@ -60,11 +60,12 @@ def test_session_analytics_engine_writes_summary_json(tmp_path: Path) -> None:
     engine.add_record(_record(0, 1.0, ContextLabel.CASUAL_USE.value))
     output_path = tmp_path / "analytics" / "summary.json"
 
-    engine.write_summary(
+    summary = engine.write_summary(
         str(output_path),
         BenchmarkSummary(frames_processed=1, average_inference_ms=9.5),
     )
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert summary.frames_processed == 1
     assert payload["frames_processed"] == 1
     assert payload["average_inference_ms"] == 9.5
