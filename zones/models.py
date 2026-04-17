@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from common.models import Detection
+
 
 class ZoneType(StrEnum):
     """Supported V1 zone categories."""
@@ -50,3 +52,13 @@ class Zone:
         if self.profile is not None:
             payload["profile"] = self.profile
         return payload
+
+
+@dataclass(slots=True, frozen=True)
+class ZoneAssignment:
+    """Primary zone membership for one detection in the current frame."""
+
+    zone_id: str
+    detection: Detection
+    method: str
+    score: float
