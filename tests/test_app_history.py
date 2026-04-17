@@ -6,6 +6,7 @@ import sys
 from types import SimpleNamespace
 
 import app
+from common.models import ContextLabel
 from common.config import VisionOSConfig
 from common.models import SourceMode
 
@@ -85,3 +86,36 @@ def test_main_passes_history_artifact_paths_to_runtime(monkeypatch) -> None:
     assert app.main() == 0
     assert captured["config"].history_output_path == "out/history.jsonl"
     assert captured["config"].session_summary_output_path == "out/session-summary.json"
+
+
+def test_finalize_run_logs_analytics_even_without_summary_output() -> None:
+    tracker = app.BenchmarkTracker()
+    tracker.record_inference(0.0, 10.0, ContextLabel.CASUAL_USE)
+    captured = []
+
+    class _Logger:
+        def log(self, event: str, **kwargs) -> None:
+            captured.append((event, kwargs))
+
+    class _AnalyticsEngine:
+        def build_summary(self, benchmark_summary):
+            return SimpleNamespace(
+                dominant_scene_label="Casual Use",
+                event_counts={"zone_occupied": 2},
+                focus_duration_seconds=0.0,
+            )
+
+    result = app._finalize_run(
+        VisionOSConfig(source_mode=SourceMode.VIDEO),
+        tracker,
+        _Logger(),
+        analytics_engine=_AnalyticsEngine(),
+    )
+
+    assert result == 0
+    assert any(
+        event == "run_completed"
+        and payload["dominant_scene_label"] == "Casual Use"
+        and payload["total_event_count"] == 2
+        for event, payload in captured
+    )
