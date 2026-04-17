@@ -37,6 +37,7 @@ to model what is happening over time.
 - temporal memory for sustained focus, distraction spikes, collaboration growth, and unstable context
 - typed runtime events for transitions, distractions, collaboration changes, and stability changes
 - zone-aware reasoning for named desks, benches, and room areas through `--zones-file`
+- runtime profiles for workstation, study room, meeting room, lab bench, and waiting area deployments
 - structured explanations for both compact and debug rendering
 - benchmark output with FPS, latency, dropped frames, switch rate, stability score, and stage timings
 - replay recording for deterministic debugging and regression testing
@@ -174,6 +175,39 @@ With a zone file, Vision OS keeps the existing frame-level scene label and also
 computes zone-local state such as `empty`, `occupied`, `solo_focus`, and
 `group_activity` for each configured region.
 
+### Profile-aware mode
+
+Use this when the same runtime should behave like a packaged deployment type
+instead of a generic scene observer:
+
+```bash
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --profile meeting_room \
+  --zones-file demo/sample-zones.yaml \
+  --overlay-mode debug
+```
+
+Built-in profiles currently include:
+
+- `workstation`
+- `study_room`
+- `meeting_room`
+- `lab_bench`
+- `waiting_area`
+
+Profiles can contribute:
+
+- a built-in or custom policy file
+- default trigger bundles
+- default zones file references
+- profile-scoped overlay sections
+
+Explicit CLI flags still win. For example, `--overlay-mode debug` overrides a
+profile's default overlay mode, and `--trigger-file custom.yaml` overrides a
+profile's bundled trigger file.
+
 ### Triggered zone mode
 
 Use this when stable scene states or zone events should also fan out to logs,
@@ -231,6 +265,8 @@ Replay mode is good for:
 | `--benchmark-output PATH` | write benchmark metrics to JSON |
 | `--zones-file PATH` | load a YAML file with named polygon zones |
 | `--trigger-file PATH` | load a YAML file with event trigger outputs |
+| `--profile NAME` | load a built-in runtime profile |
+| `--profile-file PATH` | load a custom runtime profile manifest |
 | `--headless` | disable the OpenCV window |
 | `--log-json` | emit structured logs to stderr |
 | `--max-frames N` | stop after N processed frames |
@@ -248,6 +284,14 @@ You can inspect built-in presets here:
 - `policies/office.yaml`
 - `policies/home.yaml`
 
+You can inspect built-in runtime profiles here:
+
+- `profiles/workstation.yaml`
+- `profiles/study_room.yaml`
+- `profiles/meeting_room.yaml`
+- `profiles/lab_bench.yaml`
+- `profiles/waiting_area.yaml`
+
 ## Typical Workflows
 
 ### Fast sanity check after cloning
@@ -255,6 +299,18 @@ You can inspect built-in presets here:
 ```bash
 source .venv/bin/activate
 python app.py --source video --input demo/sample.mp4 --max-frames 60
+```
+
+### Smoke-test one built-in profile
+
+```bash
+source .venv/bin/activate
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --profile meeting_room \
+  --zones-file demo/sample-zones.yaml \
+  --max-frames 60
 ```
 
 ### Build a replay artifact from a live webcam session
