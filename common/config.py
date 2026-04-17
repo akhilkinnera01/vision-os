@@ -25,6 +25,8 @@ class VisionOSConfig:
     trigger_path: str | None = None
     record_path: str | None = None
     benchmark_output_path: str | None = None
+    history_output_path: str | None = None
+    session_summary_output_path: str | None = None
     policy_name: str = "default"
     policy_path: str | None = None
     overlay_mode: OverlayMode = OverlayMode.COMPACT

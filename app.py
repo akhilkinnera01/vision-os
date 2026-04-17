@@ -52,6 +52,8 @@ def parse_args() -> VisionOSConfig:
     )
     parser.add_argument("--record", help="Optional path to save replayable detections as JSONL.")
     parser.add_argument("--benchmark-output", help="Optional path to write benchmark metrics as JSON.")
+    parser.add_argument("--history-output", help="Optional path to write structured session history as JSONL.")
+    parser.add_argument("--session-summary-output", help="Optional path to write a session analytics summary as JSON.")
     parser.add_argument("--policy", default="default", help="Named policy to load from the policies/ directory.")
     parser.add_argument("--policy-file", help="Optional path to a custom policy YAML file.")
     parser.add_argument(
@@ -90,6 +92,8 @@ def parse_args() -> VisionOSConfig:
         trigger_path=args.trigger_file,
         record_path=args.record,
         benchmark_output_path=args.benchmark_output,
+        history_output_path=args.history_output,
+        session_summary_output_path=args.session_summary_output,
         policy_name=args.policy,
         policy_path=args.policy_file,
         overlay_mode=OverlayMode(args.overlay_mode),
@@ -192,6 +196,8 @@ def _log_run_started(
         trigger_path=config.trigger_path,
         record_path=config.record_path,
         benchmark_output_path=config.benchmark_output_path,
+        history_output_path=config.history_output_path,
+        session_summary_output_path=config.session_summary_output_path,
     )
 
 
