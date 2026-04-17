@@ -17,6 +17,7 @@ from common.profile import ProfileValidationError, RuntimeProfile, load_profile
 from common.policy import PolicyValidationError, load_policy
 from integrations import IntegrationConfigError, load_trigger_config
 from runtime.benchmark import BenchmarkTracker
+from runtime.history import HistoryRecorder, SessionAnalyticsEngine
 from runtime.pipeline import InferenceOutput, VisionPipeline
 from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, WebcamFrameSource
 from telemetry.health import HealthMonitor
@@ -205,16 +206,32 @@ def _finalize_run(
     config: VisionOSConfig,
     benchmark_tracker: BenchmarkTracker,
     logger: VisionLogger,
+    *,
+    analytics_engine: SessionAnalyticsEngine | None = None,
 ) -> int:
     """Persist run artifacts, emit completion logs, and print the benchmark summary."""
     if config.record_path and config.source_mode != SourceMode.REPLAY:
         logger.log("artifact_written", kind="replay", path=config.record_path, mode=config.source_mode.value)
+
+    if config.history_output_path:
+        logger.log("artifact_written", kind="history", path=config.history_output_path, mode=config.source_mode.value)
 
     if config.benchmark_output_path:
         benchmark_tracker.write_summary(config.benchmark_output_path)
         logger.log("artifact_written", kind="benchmark", path=config.benchmark_output_path, mode=config.source_mode.value)
 
     summary = benchmark_tracker.summary()
+    analytics_summary = None
+    if analytics_engine is not None and hasattr(analytics_engine, "build_summary"):
+        analytics_summary = analytics_engine.build_summary(summary)
+    if config.session_summary_output_path and analytics_engine is not None:
+        analytics_engine.write_summary(config.session_summary_output_path, summary)
+        logger.log(
+            "artifact_written",
+            kind="session_summary",
+            path=config.session_summary_output_path,
+            mode=config.source_mode.value,
+        )
     logger.log(
         "run_completed",
         mode=config.source_mode.value,
@@ -224,6 +241,9 @@ def _finalize_run(
         dropped_frames=summary.dropped_frames,
         decision_switch_rate=summary.decision_switch_rate,
         scene_stability_score=summary.scene_stability_score,
+        dominant_scene_label=None if analytics_summary is None else analytics_summary.dominant_scene_label,
+        total_event_count=None if analytics_summary is None else sum(analytics_summary.event_counts.values()),
+        focus_duration_seconds=None if analytics_summary is None else analytics_summary.focus_duration_seconds,
     )
     print(f"Benchmark summary: {summary.to_dict()}")
     return 0
@@ -243,12 +263,14 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
         return 1
 
     benchmark_tracker = BenchmarkTracker()
+    analytics_engine = SessionAnalyticsEngine()
     health_monitor = HealthMonitor()
     recorder = (
         ReplayRecorder(config.record_path, config.source_mode)
         if config.record_path and config.source_mode != SourceMode.REPLAY
         else None
     )
+    history_recorder = HistoryRecorder(config.history_output_path) if config.history_output_path else None
 
     frame_queue: queue.Queue = queue.Queue(maxsize=1)
     result_queue: queue.Queue = queue.Queue(maxsize=1)
@@ -269,6 +291,7 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
                 continue
             try:
                 output = pipeline.process(packet)
+                history_record = getattr(output, "history_record", None)
                 if recorder is not None:
                     recorder.write(
                         frame_index=packet.frame_index,
@@ -278,7 +301,12 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
                         events=output.events,
                         zone_states=output.zone_states,
                         trigger_records=output.trigger_records,
+                        history_record=history_record,
                     )
+                if history_record is not None:
+                    analytics_engine.add_record(history_record)
+                    if history_recorder is not None:
+                        history_recorder.write(history_record)
                 _queue_latest(result_queue, output)
             except Exception as exc:  # pragma: no cover - exercised in runtime
                 health_monitor.report_exception("pipeline", exc)
@@ -331,10 +359,12 @@ def _run_streaming_mode(config: VisionOSConfig, policy, zones, trigger_config, s
         source.close()
         if recorder is not None:
             recorder.close()
+        if history_recorder is not None:
+            history_recorder.close()
         if not config.headless:
             cv2.destroyAllWindows()
 
-    return _finalize_run(config, benchmark_tracker, logger)
+    return _finalize_run(config, benchmark_tracker, logger, analytics_engine=analytics_engine)
 
 
 def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, source, renderer: FrameRenderer, logger: VisionLogger) -> int:
@@ -346,11 +376,13 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
         return 1
 
     benchmark_tracker = BenchmarkTracker()
+    analytics_engine = SessionAnalyticsEngine()
     recorder = (
         ReplayRecorder(config.record_path, config.source_mode)
         if config.record_path and config.source_mode != SourceMode.REPLAY
         else None
     )
+    history_recorder = HistoryRecorder(config.history_output_path) if config.history_output_path else None
     pipeline = VisionPipeline(
         config,
         policy=policy,
@@ -366,6 +398,7 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
             if packet is None:
                 break
             output = pipeline.process(packet)
+            history_record = getattr(output, "history_record", None)
             if recorder is not None:
                 recorder.write(
                     frame_index=packet.frame_index,
@@ -375,7 +408,12 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
                     events=output.events,
                     zone_states=output.zone_states,
                     trigger_records=output.trigger_records,
+                    history_record=history_record,
                 )
+            if history_record is not None:
+                analytics_engine.add_record(history_record)
+                if history_recorder is not None:
+                    history_recorder.write(history_record)
             processed_frames += 1
 
             if not config.headless:
@@ -397,10 +435,12 @@ def _run_sequential_mode(config: VisionOSConfig, policy, zones, trigger_config, 
         source.close()
         if recorder is not None:
             recorder.close()
+        if history_recorder is not None:
+            history_recorder.close()
         if not config.headless:
             cv2.destroyAllWindows()
 
-    return _finalize_run(config, benchmark_tracker, logger)
+    return _finalize_run(config, benchmark_tracker, logger, analytics_engine=analytics_engine)
 
 
 def main() -> int:
