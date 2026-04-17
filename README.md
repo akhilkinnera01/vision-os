@@ -106,6 +106,13 @@ python app.py \
   --overlay-mode debug
 ```
 
+The repo already ships these demo artifacts from the sample flow:
+
+- `demo/sample.mp4`
+- `demo/demo-replay.jsonl`
+- `demo/demo-benchmark.json`
+- `demo/sample-overlay.png`
+
 Press `q` to exit any non-headless run.
 
 ## Run Modes
@@ -276,6 +283,8 @@ Use replay files when you want:
 - faster iteration on scene logic
 - regression fixtures for tests
 
+The repository includes a committed example at `demo/demo-replay.jsonl`.
+
 ### Benchmark file
 
 When you pass `--benchmark-output`, Vision OS writes a JSON summary with:
@@ -289,6 +298,8 @@ When you pass `--benchmark-output`, Vision OS writes a JSON summary with:
 - `stage_timings`
 
 Full field descriptions live in [`docs/benchmark-output.md`](docs/benchmark-output.md).
+
+The repository includes a committed example at `demo/demo-benchmark.json`.
 
 ## How the Pipeline Is Organized
 
