@@ -41,6 +41,7 @@ to model what is happening over time.
 - structured explanations for both compact and debug rendering
 - benchmark output with FPS, latency, dropped frames, switch rate, stability score, and stage timings
 - replay recording for deterministic debugging and regression testing
+- structured session history and analytics exports through `--history-output` and `--session-summary-output`
 - policy-driven thresholds through YAML configuration
 
 ## Repository Layout
@@ -90,14 +91,16 @@ python app.py \
 
 This is the easiest way to confirm the app is wired correctly before testing a live camera.
 
-### 3. Save a replay and benchmark
+### 3. Save a replay, benchmark, and session analytics
 
 ```bash
 python app.py \
   --source video \
   --input demo/sample.mp4 \
   --record demo/demo-replay.jsonl \
-  --benchmark-output demo/demo-benchmark.json
+  --benchmark-output demo/demo-benchmark.json \
+  --history-output demo/demo-history.jsonl \
+  --session-summary-output demo/demo-session-summary.json
 ```
 
 ### 4. Replay the exact same run in debug mode
@@ -116,6 +119,8 @@ The repo already ships these demo artifacts from the sample flow:
 - `demo/sample-triggers.yaml`
 - `demo/demo-replay.jsonl`
 - `demo/demo-benchmark.json`
+- `demo/demo-history.jsonl`
+- `demo/demo-session-summary.json`
 - `demo/sample-overlay.png`
 
 Press `q` to exit any non-headless run.
@@ -222,6 +227,23 @@ python app.py \
   --overlay-mode debug
 ```
 
+### Event history and analytics mode
+
+Use this when you want the run to remain queryable after it ends:
+
+```bash
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --history-output out/history.jsonl \
+  --session-summary-output out/session-summary.json \
+  --benchmark-output out/bench.json
+```
+
+`--history-output` writes one append-only JSONL record per stable runtime result, while
+`--session-summary-output` writes one session-level JSON summary with dominant label,
+label durations, event counts, stability, FPS, and stage timings.
+
 ### Replay mode
 
 Use this when you want to inspect reasoning without rerunning YOLO:
@@ -263,6 +285,8 @@ Replay mode is good for:
 | `--overlay-mode compact|debug` | choose a lighter or fuller UI overlay |
 | `--record PATH` | write replayable detections and events to JSONL |
 | `--benchmark-output PATH` | write benchmark metrics to JSON |
+| `--history-output PATH` | write structured runtime history records to JSONL |
+| `--session-summary-output PATH` | write a session analytics summary to JSON |
 | `--zones-file PATH` | load a YAML file with named polygon zones |
 | `--trigger-file PATH` | load a YAML file with event trigger outputs |
 | `--profile NAME` | load a built-in runtime profile |
@@ -321,6 +345,20 @@ python app.py \
   --camera 0 \
   --record out/webcam-session.jsonl \
   --benchmark-output out/webcam-benchmark.json
+```
+
+### Export history and summary artifacts from the sample video
+
+```bash
+python app.py \
+  --source video \
+  --input demo/sample.mp4 \
+  --zones-file demo/sample-zones.yaml \
+  --history-output out/history.jsonl \
+  --session-summary-output out/session-summary.json \
+  --benchmark-output out/session-benchmark.json \
+  --headless \
+  --max-frames 60
 ```
 
 ### Inspect a previous run without using the camera or detector
@@ -483,6 +521,37 @@ When you pass `--benchmark-output`, Vision OS writes a JSON summary with:
 Full field descriptions live in [`docs/benchmark-output.md`](docs/benchmark-output.md).
 
 The repository includes a committed example at `demo/demo-benchmark.json`.
+
+### Session history file
+
+When you pass `--history-output`, Vision OS writes a JSONL timeline of stable runtime
+history. Each line stores the chosen scene label, confidence, recent event types,
+stage timings, zone labels, and a few analytics-friendly metrics such as focus duration,
+switch rate, FPS, and average inference time.
+
+Use history files when you want:
+
+- post-run analytics
+- time-window inspection
+- dashboard ingestion
+- reproducible historical regressions
+
+The repository includes a committed example at `demo/demo-history.jsonl`.
+Field descriptions live in [`docs/session-history.md`](docs/session-history.md).
+
+### Session summary file
+
+When you pass `--session-summary-output`, Vision OS writes one JSON document with:
+
+- dominant scene label
+- label durations
+- event counts
+- average stability score
+- focus and group-activity durations
+- FPS, inference latency, and stage timings
+
+The repository includes a committed example at `demo/demo-session-summary.json`.
+Field descriptions live in [`docs/session-history.md`](docs/session-history.md).
 
 ## How the Pipeline Is Organized
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import sys
 from types import SimpleNamespace
 
@@ -218,3 +219,123 @@ def test_run_sequential_mode_records_trigger_records(monkeypatch, tmp_path) -> N
 
     assert result == 0
     assert writes[0]["trigger_records"] == (trigger_record,)
+
+
+def test_run_sequential_mode_records_history_records(monkeypatch, tmp_path) -> None:
+    config = VisionOSConfig(
+        source_mode=SourceMode.VIDEO,
+        input_path="demo/sample.mp4",
+        history_output_path=str(tmp_path / "history.jsonl"),
+        session_summary_output_path=str(tmp_path / "session-summary.json"),
+        headless=True,
+        max_frames=1,
+    )
+    packet = SimpleNamespace(
+        frame_index=0,
+        timestamp=0.0,
+        frame=np.zeros((720, 1280, 3), dtype=np.uint8),
+    )
+    history_record = SimpleNamespace(frame_index=0, scene_label="Focused Work")
+    history_writes = []
+    summaries = []
+
+    class FakeSource:
+        def __init__(self) -> None:
+            self._packets = [packet]
+
+        def is_opened(self) -> bool:
+            return True
+
+        def read(self):
+            return self._packets.pop(0) if self._packets else None
+
+        def close(self) -> None:
+            pass
+
+    class FakeHistoryRecorder:
+        def write(self, record) -> None:
+            history_writes.append(record)
+
+        def close(self) -> None:
+            pass
+
+    class FakeAnalyticsEngine:
+        def add_record(self, record) -> None:
+            summaries.append(("record", record))
+
+        def write_summary(self, output_path, benchmark_summary) -> None:
+            summaries.append(("summary", output_path, benchmark_summary))
+
+    monkeypatch.setattr(app, "HistoryRecorder", lambda *_args, **_kwargs: FakeHistoryRecorder(), raising=False)
+    monkeypatch.setattr(app, "SessionAnalyticsEngine", lambda: FakeAnalyticsEngine(), raising=False)
+    monkeypatch.setattr(
+        app,
+        "VisionPipeline",
+        lambda _config, policy=None, zones=(), trigger_config=None, benchmark_tracker=None: SimpleNamespace(
+            process=lambda _packet: SimpleNamespace(
+                detections=[],
+                decision=SimpleNamespace(label=ContextLabel.FOCUSED_WORK),
+                explanation=SimpleNamespace(),
+                runtime_metrics=RuntimeMetrics(frames_processed=1),
+                zone_states=(),
+                events=[],
+                trigger_records=(),
+                history_record=history_record,
+            )
+        ),
+    )
+
+    result = app._run_sequential_mode(
+        config,
+        load_policy("default"),
+        (),
+        None,
+        FakeSource(),
+        SimpleNamespace(),
+        app.VisionLogger(False),
+    )
+
+    assert result == 0
+    assert history_writes == [history_record]
+    assert summaries[0] == ("record", history_record)
+    assert summaries[1][0] == "summary"
+
+
+def test_finalize_run_logs_history_and_session_summary_artifacts(tmp_path) -> None:
+    tracker = app.BenchmarkTracker()
+    tracker.record_inference(0.0, 12.0, ContextLabel.FOCUSED_WORK)
+    captured = []
+
+    class FakeLogger:
+        def log(self, event: str, **kwargs) -> None:
+            captured.append((event, kwargs))
+
+    class FakeAnalyticsEngine:
+        def build_summary(self, benchmark_summary):
+            return SimpleNamespace(
+                dominant_scene_label="Focused Work",
+                event_counts={"focus_sustained": 2, "distraction_started": 1},
+                focus_duration_seconds=12.0,
+            )
+
+        def write_summary(self, output_path, benchmark_summary) -> None:
+            Path(output_path).write_text("{}", encoding="utf-8")
+
+    config = VisionOSConfig(
+        source_mode=SourceMode.VIDEO,
+        history_output_path=str(tmp_path / "history.jsonl"),
+        session_summary_output_path=str(tmp_path / "session-summary.json"),
+    )
+
+    result = app._finalize_run(config, tracker, FakeLogger(), analytics_engine=FakeAnalyticsEngine())
+
+    assert result == 0
+    assert any(event == "artifact_written" and payload["kind"] == "history" for event, payload in captured)
+    assert any(event == "artifact_written" and payload["kind"] == "session_summary" for event, payload in captured)
+    assert any(
+        event == "run_completed"
+        and payload["dominant_scene_label"] == "Focused Work"
+        and payload["total_event_count"] == 3
+        and payload["focus_duration_seconds"] == 12.0
+        for event, payload in captured
+    )

@@ -26,6 +26,8 @@ def test_demo_replay_artifact_exists_and_has_frames() -> None:
     assert payload["source_mode"] == "video"
     assert "detections" in payload
     assert "frame_shape" in payload
+    assert "history_record" in payload
+    assert payload["history_record"]["scene_label"]
 
 
 def test_demo_benchmark_artifact_has_expected_fields() -> None:
@@ -37,6 +39,31 @@ def test_demo_benchmark_artifact_has_expected_fields() -> None:
     assert "average_inference_ms" in payload
     assert "stage_timings" in payload
     assert "detect" in payload["stage_timings"]
+
+
+def test_demo_history_artifact_has_expected_fields() -> None:
+    history_path = DEMO_DIR / "demo-history.jsonl"
+
+    assert history_path.is_file()
+    first_line = history_path.read_text(encoding="utf-8").splitlines()[0]
+    payload = json.loads(first_line)
+
+    assert payload["frame_index"] >= 0
+    assert "scene_label" in payload
+    assert "event_types" in payload
+    assert "zone_labels" in payload
+    assert "stage_timings" in payload
+
+
+def test_demo_session_summary_artifact_has_expected_fields() -> None:
+    summary_path = DEMO_DIR / "demo-session-summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert payload["frames_processed"] > 0
+    assert "dominant_scene_label" in payload
+    assert "label_durations" in payload
+    assert "event_counts" in payload
+    assert "average_stability_score" in payload
 
 
 def test_demo_overlay_image_is_present_and_loadable() -> None:
