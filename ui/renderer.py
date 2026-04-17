@@ -8,6 +8,7 @@ import textwrap
 import cv2
 import numpy as np
 
+from common.profile import OverlaySection, ProfilePresentation
 from common.models import BoundingBox, Decision, Detection, Explanation, OverlayMode, RuntimeMetrics
 from zones.models import ZoneRuntimeState
 
@@ -65,8 +66,13 @@ class FrameRenderer:
     RUNTIME_STYLE = _TextStyle(scale=0.46, thickness=1, color=HEADER_TEXT)
     DETECTION_LABEL_STYLE = _TextStyle(scale=0.55, thickness=2, color=BOX_COLOR)
 
-    def __init__(self, overlay_mode: OverlayMode = OverlayMode.COMPACT) -> None:
+    def __init__(
+        self,
+        overlay_mode: OverlayMode = OverlayMode.COMPACT,
+        presentation: ProfilePresentation | None = None,
+    ) -> None:
         self.overlay_mode = overlay_mode
+        self.presentation = presentation or ProfilePresentation(overlay_mode=overlay_mode)
 
     def render(
         self,
@@ -165,15 +171,45 @@ class FrameRenderer:
         )
         cursor_top = self._append_lines(rows, summary_lines, self.BODY_STYLE, cursor_top)
 
-        metric_lines = self._wrap_text_to_width(
-            self._format_score_line(explanation.scores),
-            max_width=content_width,
-            style=self.METRIC_STYLE,
-            max_lines=2,
-        )
-        cursor_top = self._append_lines(rows, metric_lines, self.METRIC_STYLE, cursor_top)
+        sections = self._active_sections()
+        if OverlaySection.SCORES in sections:
+            metric_lines = self._wrap_text_to_width(
+                self._format_score_line(explanation.scores),
+                max_width=content_width,
+                style=self.METRIC_STYLE,
+                max_lines=2,
+            )
+            cursor_top = self._append_lines(rows, metric_lines, self.METRIC_STYLE, cursor_top)
 
-        if explanation.zone_summaries:
+        if OverlaySection.EVENTS in sections and explanation.recent_events:
+            event_lines = self._wrap_text_to_width(
+                f"Events: {', '.join(explanation.recent_events)}",
+                max_width=content_width,
+                style=self.BODY_STYLE if self.overlay_mode == OverlayMode.COMPACT else self.EMPHASIS_STYLE,
+                max_lines=2,
+            )
+            cursor_top = self._append_lines(
+                rows,
+                event_lines,
+                self.BODY_STYLE if self.overlay_mode == OverlayMode.COMPACT else self.EMPHASIS_STYLE,
+                cursor_top,
+            )
+
+        if OverlaySection.TRIGGERS in sections and explanation.recent_triggers:
+            trigger_lines = self._wrap_text_to_width(
+                f"Triggers: {', '.join(explanation.recent_triggers)}",
+                max_width=content_width,
+                style=self.BODY_STYLE if self.overlay_mode == OverlayMode.COMPACT else self.EMPHASIS_STYLE,
+                max_lines=2,
+            )
+            cursor_top = self._append_lines(
+                rows,
+                trigger_lines,
+                self.BODY_STYLE if self.overlay_mode == OverlayMode.COMPACT else self.EMPHASIS_STYLE,
+                cursor_top,
+            )
+
+        if OverlaySection.ZONES in sections and explanation.zone_summaries:
             zone_lines = self._wrap_text_to_width(
                 f"Zones: {', '.join(explanation.zone_summaries)}",
                 max_width=content_width,
@@ -198,22 +234,25 @@ class FrameRenderer:
                     max_lines=2,
                 )
                 cursor_top = self._append_lines(rows, risk_lines, self.EMPHASIS_STYLE, cursor_top)
-            if explanation.recent_events:
-                event_lines = self._wrap_text_to_width(
-                    f"Events: {', '.join(explanation.recent_events)}",
-                    max_width=content_width,
-                    style=self.EMPHASIS_STYLE,
-                    max_lines=2,
-                )
-                cursor_top = self._append_lines(rows, event_lines, self.EMPHASIS_STYLE, cursor_top)
+            if OverlaySection.SPATIAL in sections:
+                spatial_line = self._find_debug_line(explanation, prefix="Spatial:")
+                if spatial_line is not None:
+                    spatial_lines = self._wrap_text_to_width(
+                        spatial_line,
+                        max_width=content_width,
+                        style=self.DEBUG_STYLE,
+                        max_lines=2,
+                    )
+                    cursor_top = self._append_lines(rows, spatial_lines, self.DEBUG_STYLE, cursor_top)
 
-        runtime_lines = self._wrap_text_to_width(
-            self._format_runtime_line(runtime_metrics),
-            max_width=content_width,
-            style=self.RUNTIME_STYLE,
-            max_lines=2,
-        )
-        self._append_lines(rows, runtime_lines, self.RUNTIME_STYLE, cursor_top, add_section_gap=False)
+        if OverlaySection.RUNTIME in sections:
+            runtime_lines = self._wrap_text_to_width(
+                self._format_runtime_line(runtime_metrics),
+                max_width=content_width,
+                style=self.RUNTIME_STYLE,
+                max_lines=2,
+            )
+            self._append_lines(rows, runtime_lines, self.RUNTIME_STYLE, cursor_top, add_section_gap=False)
 
         content_bottom = rows[-1].bottom if rows else self.PANEL_PADDING_Y
         panel_height = min(
@@ -307,6 +346,19 @@ class FrameRenderer:
     def _minimum_panel_height(self) -> int:
         """Keep a modest baseline header size even for short summaries."""
         return 136 if self.overlay_mode == OverlayMode.COMPACT else 220
+
+    def _active_sections(self) -> tuple[OverlaySection, ...]:
+        """Return the section set for the current overlay density."""
+        if self.overlay_mode == OverlayMode.DEBUG:
+            return self.presentation.debug_sections
+        return self.presentation.compact_sections
+
+    def _find_debug_line(self, explanation: Explanation, *, prefix: str) -> str | None:
+        """Look up one generated debug line by its stable prefix."""
+        for line in explanation.debug_lines:
+            if line.startswith(prefix):
+                return line
+        return None
 
     def _compute_detection_label_baseline(
         self,

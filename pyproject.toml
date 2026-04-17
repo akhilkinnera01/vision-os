@@ -56,10 +56,13 @@ include = [
   "telemetry.*",
   "policies",
   "policies.*",
+  "profiles",
+  "profiles.*",
 ]
 
 [tool.setuptools.package-data]
 policies = ["*.yaml"]
+profiles = ["*.yaml", "triggers/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

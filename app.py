@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import queue
 import sys
 import threading
@@ -12,6 +13,7 @@ import cv2
 
 from common.config import VisionOSConfig
 from common.models import OverlayMode, SourceMode
+from common.profile import ProfileValidationError, RuntimeProfile, load_profile
 from common.policy import PolicyValidationError, load_policy
 from integrations import IntegrationConfigError, load_trigger_config
 from runtime.benchmark import BenchmarkTracker
@@ -20,15 +22,18 @@ from runtime.io import ReplayFrameSource, ReplayRecorder, VideoFrameSource, Webc
 from telemetry.health import HealthMonitor
 from telemetry.logging import VisionLogger
 from ui.renderer import FrameRenderer
-from zones import ZoneConfigError, load_zones
+from zones import ZoneConfigError, load_zones, select_zones_for_profile
 
 
 def parse_args() -> VisionOSConfig:
     """Parse CLI arguments into a runtime config object."""
     parser = argparse.ArgumentParser(description="Run Vision OS on a webcam, video, or replay feed.")
+    argv = sys.argv[1:]
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--source", choices=[mode.value for mode in SourceMode], default="webcam")
     parser.add_argument("--input", help="Path to a video file or replay artifact.")
+    parser.add_argument("--profile", help="Optional built-in runtime profile name.")
+    parser.add_argument("--profile-file", help="Optional path to a custom runtime profile YAML file.")
     parser.add_argument("--zones-file", help="Optional path to a YAML file that defines static polygon zones.")
     parser.add_argument("--trigger-file", help="Optional path to a YAML file that defines event trigger outputs.")
     parser.add_argument("--model", default="yolov8n.pt", help="YOLO weights path or name.")
@@ -79,6 +84,8 @@ def parse_args() -> VisionOSConfig:
         max_detections=args.max_detections,
         source_mode=source_mode,
         input_path=args.input,
+        profile_name=args.profile,
+        profile_path=args.profile_file,
         zones_path=args.zones_file,
         trigger_path=args.trigger_file,
         record_path=args.record,
@@ -90,6 +97,10 @@ def parse_args() -> VisionOSConfig:
         max_frames=args.max_frames,
         headless=args.headless,
         log_json=args.log_json,
+        policy_explicit=("--policy" in argv) or ("--policy-file" in argv),
+        zones_explicit="--zones-file" in argv,
+        trigger_explicit="--trigger-file" in argv,
+        overlay_mode_explicit="--overlay-mode" in argv,
     )
 
 
@@ -117,6 +128,30 @@ def _build_source(config: VisionOSConfig):
     return ReplayFrameSource(config.input_path or "")
 
 
+def _apply_profile_defaults(config: VisionOSConfig, profile: RuntimeProfile) -> VisionOSConfig:
+    """Fill unresolved runtime settings from a selected profile while preserving explicit flags."""
+    resolved = config
+    if not resolved.policy_explicit:
+        if profile.policy_path is not None:
+            resolved = replace(resolved, policy_path=profile.policy_path)
+        else:
+            resolved = replace(resolved, policy_name=profile.policy_name)
+    if not resolved.zones_explicit and profile.zones_path is not None:
+        resolved = replace(resolved, zones_path=profile.zones_path)
+    if not resolved.trigger_explicit and profile.trigger_path is not None:
+        resolved = replace(resolved, trigger_path=profile.trigger_path)
+    if not resolved.overlay_mode_explicit:
+        resolved = replace(resolved, overlay_mode=profile.presentation.overlay_mode)
+    return resolved
+
+
+def _load_selected_profile(config: VisionOSConfig) -> RuntimeProfile | None:
+    """Load the requested runtime profile when the operator selected one."""
+    if config.profile_name is None and config.profile_path is None:
+        return None
+    return load_profile(name=config.profile_name, path=config.profile_path)
+
+
 def _validate_input_path(config: VisionOSConfig) -> None:
     """Fail fast with a readable CLI error when file-backed inputs are missing."""
     if config.source_mode in {SourceMode.VIDEO, SourceMode.REPLAY}:
@@ -135,12 +170,20 @@ def _validate_input_path(config: VisionOSConfig) -> None:
             raise FileNotFoundError(f"Trigger config not found: {trigger_path}")
 
 
-def _log_run_started(config: VisionOSConfig, policy_name: str, zone_count: int, logger: VisionLogger) -> None:
+def _log_run_started(
+    config: VisionOSConfig,
+    policy_name: str,
+    zone_count: int,
+    logger: VisionLogger,
+    *,
+    profile_id: str | None = None,
+) -> None:
     """Emit one structured record that captures the active runtime configuration."""
     logger.log(
         "run_started",
         mode=config.source_mode.value,
         policy=policy_name,
+        profile=profile_id,
         zone_count=zone_count,
         overlay_mode=config.overlay_mode.value,
         headless=config.headless,
@@ -358,18 +401,28 @@ def main() -> int:
     """Run the end-to-end source loop until the user quits or the source is exhausted."""
     try:
         config = parse_args()
+        profile = _load_selected_profile(config)
+        if profile is not None:
+            config = _apply_profile_defaults(config, profile)
         _validate_input_path(config)
         policy = load_policy(name=config.policy_name, path=config.policy_path)
         zones = load_zones(config.zones_path) if config.zones_path else ()
+        zones = select_zones_for_profile(
+            zones,
+            active_profile=None if profile is None else profile.profile_id,
+        )
         trigger_config = load_trigger_config(config.trigger_path) if config.trigger_path else None
         logger = VisionLogger(config.log_json)
-        renderer = FrameRenderer(config.overlay_mode)
+        renderer = FrameRenderer(
+            config.overlay_mode,
+            presentation=None if profile is None else profile.presentation,
+        )
         source = _build_source(config)
-    except (FileNotFoundError, PolicyValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
+    except (FileNotFoundError, PolicyValidationError, ProfileValidationError, IntegrationConfigError, ZoneConfigError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    _log_run_started(config, policy.name, len(zones), logger)
+    _log_run_started(config, policy.name, len(zones), logger, profile_id=None if profile is None else profile.profile_id)
     if _should_use_streaming_runtime(config):
         return _run_streaming_mode(config, policy, zones, trigger_config, source, renderer, logger)
     return _run_sequential_mode(config, policy, zones, trigger_config, source, renderer, logger)

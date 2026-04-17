@@ -1,0 +1,20 @@
+id: study_room
+name: Study Room
+description: Small bookable room optimized for focused or collaborative study.
+policy: default
+trigger_file: triggers/study_room.yaml
+presentation:
+  overlay_mode: debug
+  compact_sections:
+    - scores
+    - zones
+  debug_sections:
+    - scores
+    - zones
+    - events
+    - triggers
+    - runtime
+scene_labels:
+  - Focused Work
+  - Group Activity
+  - Casual Use

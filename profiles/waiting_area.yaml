@@ -1,0 +1,17 @@
+id: waiting_area
+name: Waiting Area
+description: Occupancy-oriented profile for low-intensity shared spaces.
+policy: home
+trigger_file: triggers/waiting_area.yaml
+presentation:
+  overlay_mode: compact
+  compact_sections:
+    - zones
+    - runtime
+  debug_sections:
+    - scores
+    - zones
+    - events
+    - runtime
+scene_labels:
+  - Casual Use

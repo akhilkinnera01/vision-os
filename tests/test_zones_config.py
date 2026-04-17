@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from zones import ZoneConfigError, ZoneType, load_zones
+from zones import ZoneConfigError, ZoneType, load_zones, select_zones_for_profile
 
 
 def test_load_zones_preserves_order_and_defaults(tmp_path: Path) -> None:
@@ -46,6 +46,58 @@ zones:
     assert zones[1].enabled is False
     assert zones[1].labels_of_interest == ("person", "laptop")
     assert zones[1].profile == "study-room"
+
+
+def test_select_zones_for_profile_keeps_shared_and_matching_zones(tmp_path: Path) -> None:
+    config_path = tmp_path / "zones.yaml"
+    config_path.write_text(
+        """
+zones:
+  - id: shared
+    name: Shared
+    type: occupancy
+    polygon:
+      - [0, 0]
+      - [10, 0]
+      - [10, 10]
+      - [0, 10]
+  - id: study_desk
+    name: Study Desk
+    type: occupancy
+    profile: study_room
+    polygon:
+      - [20, 0]
+      - [30, 0]
+      - [30, 10]
+      - [20, 10]
+  - id: meeting_table
+    name: Meeting Table
+    type: activity
+    profile: meeting_room
+    polygon:
+      - [40, 0]
+      - [50, 0]
+      - [50, 10]
+      - [40, 10]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    zones = load_zones(str(config_path))
+
+    assert [zone.zone_id for zone in select_zones_for_profile(zones, active_profile="study_room")] == [
+        "shared",
+        "study_desk",
+    ]
+    assert [zone.zone_id for zone in select_zones_for_profile(zones, active_profile="meeting_room")] == [
+        "shared",
+        "meeting_table",
+    ]
+    assert [zone.zone_id for zone in select_zones_for_profile(zones, active_profile=None)] == [
+        "shared",
+        "study_desk",
+        "meeting_table",
+    ]
 
 
 @pytest.mark.parametrize(

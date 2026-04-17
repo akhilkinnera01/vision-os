@@ -38,6 +38,13 @@ def load_zones(path: str) -> tuple[Zone, ...]:
     return tuple(zones)
 
 
+def select_zones_for_profile(zones: tuple[Zone, ...], active_profile: str | None) -> tuple[Zone, ...]:
+    """Keep shared zones plus zones scoped to the selected runtime profile."""
+    if active_profile is None:
+        return tuple(zones)
+    return tuple(zone for zone in zones if zone.profile is None or zone.profile == active_profile)
+
+
 def _parse_zone(payload: object, index: int) -> Zone:
     if not isinstance(payload, dict):
         raise ZoneConfigError(f"Zone at index {index} must be a mapping.")

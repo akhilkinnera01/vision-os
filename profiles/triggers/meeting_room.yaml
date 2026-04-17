@@ -1,0 +1,10 @@
+triggers:
+  - id: meeting-room-collaboration-log
+    when:
+      source: event.event_type
+      operator: equals
+      value: collaboration_increasing
+    then:
+      - type: log
+        event: profile_collaboration_started
+    cooldown_seconds: 30

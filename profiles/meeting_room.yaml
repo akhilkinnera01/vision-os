@@ -1,0 +1,20 @@
+id: meeting_room
+name: Meeting Room
+description: Collaboration-first room profile for small meetings.
+policy: office
+trigger_file: triggers/meeting_room.yaml
+presentation:
+  overlay_mode: compact
+  compact_sections:
+    - scores
+    - zones
+    - triggers
+  debug_sections:
+    - scores
+    - zones
+    - events
+    - triggers
+    - runtime
+scene_labels:
+  - Group Activity
+  - Casual Use

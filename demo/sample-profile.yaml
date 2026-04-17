@@ -1,0 +1,22 @@
+id: sample_demo
+name: Sample Demo Profile
+description: Example custom profile that bundles the committed demo zones and triggers.
+policy: office
+zones_file: sample-zones.yaml
+trigger_file: sample-triggers.yaml
+presentation:
+  overlay_mode: debug
+  compact_sections:
+    - scores
+    - zones
+    - triggers
+  debug_sections:
+    - scores
+    - zones
+    - events
+    - triggers
+    - runtime
+scene_labels:
+  - Focused Work
+  - Group Activity
+  - Casual Use

@@ -1,0 +1,20 @@
+triggers:
+  - id: study-room-focus-log
+    when:
+      source: event.event_type
+      operator: equals
+      value: zone_focus_started
+    then:
+      - type: log
+        event: profile_study_focus_started
+    cooldown_seconds: 20
+
+  - id: study-room-group-log
+    when:
+      source: event.event_type
+      operator: equals
+      value: zone_group_started
+    then:
+      - type: log
+        event: profile_study_group_started
+    cooldown_seconds: 20

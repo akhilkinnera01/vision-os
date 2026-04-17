@@ -38,7 +38,7 @@ def test_main_routes_headless_webcam_through_streaming(monkeypatch) -> None:
     monkeypatch.setattr(app, "parse_args", lambda: config)
     monkeypatch.setattr(app, "_validate_input_path", lambda _config: None)
     monkeypatch.setattr(app, "load_policy", lambda name, path=None: load_policy(name, path))
-    monkeypatch.setattr(app, "FrameRenderer", lambda mode: SimpleNamespace(mode=mode))
+    monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
     monkeypatch.setattr(
         app,
@@ -106,7 +106,7 @@ def test_main_loads_zone_config_before_running(monkeypatch) -> None:
     monkeypatch.setattr(app, "_validate_input_path", lambda _config: None)
     monkeypatch.setattr(app, "load_policy", lambda name, path=None: load_policy(name, path))
     monkeypatch.setattr(app, "load_zones", lambda path: [SimpleNamespace(zone_id="desk_a"), SimpleNamespace(zone_id="desk_b")])
-    monkeypatch.setattr(app, "FrameRenderer", lambda mode: SimpleNamespace(mode=mode))
+    monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
     monkeypatch.setattr(app, "_run_streaming_mode", lambda *_args: calls.append("streaming") or 0)
     monkeypatch.setattr(app, "_run_sequential_mode", lambda *_args: calls.append("sequential") or 0)
@@ -129,7 +129,7 @@ def test_main_passes_trigger_config_into_sequential_runtime(monkeypatch) -> None
     monkeypatch.setattr(app, "load_policy", lambda name, path=None: load_policy(name, path))
     monkeypatch.setattr(app, "load_zones", lambda path: ())
     monkeypatch.setattr(app, "load_trigger_config", lambda path: "trigger-config")
-    monkeypatch.setattr(app, "FrameRenderer", lambda mode: SimpleNamespace(mode=mode))
+    monkeypatch.setattr(app, "FrameRenderer", lambda mode, presentation=None: SimpleNamespace(mode=mode, presentation=presentation))
     monkeypatch.setattr(app, "_build_source", lambda _config: object())
     monkeypatch.setattr(
         app,

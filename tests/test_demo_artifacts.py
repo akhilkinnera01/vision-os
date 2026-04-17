@@ -8,7 +8,9 @@ from pathlib import Path
 import cv2
 import yaml
 
+from common.profile import load_profile
 from integrations import load_trigger_config
+from zones import load_zones, select_zones_for_profile
 
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "demo"
@@ -55,6 +57,7 @@ def test_demo_zone_config_exists_and_has_zones() -> None:
     assert zone_path.is_file()
     assert isinstance(payload, dict)
     assert len(payload["zones"]) >= 2
+    assert any(zone.get("profile") for zone in payload["zones"])
 
 
 def test_demo_trigger_config_exists_and_has_rules() -> None:
@@ -67,3 +70,16 @@ def test_demo_trigger_config_exists_and_has_rules() -> None:
     assert len(payload["triggers"]) >= 2
     assert len(config.rules) >= 2
     assert any(rule.condition and rule.condition.source == "decision.label" for rule in config.rules)
+
+
+def test_demo_profile_manifest_exists_and_resolves_assets() -> None:
+    profile_path = DEMO_DIR / "sample-profile.yaml"
+    profile = load_profile(path=str(profile_path))
+    zones = load_zones(str(DEMO_DIR / "sample-zones.yaml"))
+    scoped_zones = select_zones_for_profile(zones, active_profile=profile.profile_id)
+
+    assert profile_path.is_file()
+    assert profile.profile_id == "sample_demo"
+    assert profile.zones_path == str(DEMO_DIR / "sample-zones.yaml")
+    assert profile.trigger_path == str(DEMO_DIR / "sample-triggers.yaml")
+    assert len(scoped_zones) >= 1
