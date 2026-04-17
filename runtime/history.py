@@ -11,6 +11,22 @@ from common.models import HistoryRecord, SessionAnalyticsSummary
 from runtime.benchmark import BenchmarkSummary
 
 
+class HistoryRecorder:
+    """Write append-only session history records as JSONL."""
+
+    def __init__(self, output_path: str) -> None:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        self._file = output.open("w", encoding="utf-8")
+
+    def write(self, record: HistoryRecord) -> None:
+        self._file.write(json.dumps(record.to_dict()) + "\n")
+        self._file.flush()
+
+    def close(self) -> None:
+        self._file.close()
+
+
 class SessionAnalyticsEngine:
     """Accumulate structured history records into one session summary."""
 
